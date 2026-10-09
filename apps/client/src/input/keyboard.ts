@@ -10,6 +10,10 @@ export class Keyboard {
     window.addEventListener("keyup", (e) => this.down.delete(e.code));
     // Releasing keys while the window is unfocused never fires keyup; clear to avoid "stuck" keys.
     window.addEventListener("blur", () => this.down.clear());
+    // Same when focus moves into a text field (e.g. chat): stop walking.
+    document.addEventListener("focusin", (e) => {
+      if (isTypingTarget(e.target)) this.down.clear();
+    });
   }
 
   isDown(...codes: string[]): boolean {
@@ -27,7 +31,12 @@ export class Keyboard {
   }
 }
 
-function isTyping(e: KeyboardEvent): boolean {
-  const t = e.target as HTMLElement | null;
+/** True when a key event comes from a text field, where keys type text instead of controlling the game. */
+export function isTyping(e: KeyboardEvent): boolean {
+  return isTypingTarget(e.target);
+}
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  const t = target as HTMLElement | null;
   return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
 }

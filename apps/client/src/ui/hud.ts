@@ -3,6 +3,8 @@ export class Hud {
   private readonly areaEl: HTMLElement;
   private readonly countEl: HTMLElement;
   private readonly fpsEl: HTMLElement;
+  private readonly promptEl: HTMLElement;
+  private lastPrompt = "";
   private frames = 0;
   private elapsed = 0;
   private lastArea = "";
@@ -16,12 +18,31 @@ export class Hud {
         <div class="hud-pill hud-count"></div>
       </div>
       <div class="hud-fps"></div>
-      <div class="hud-help">WASD / arrows move · drag to look · Q / E turn · scroll zoom · V push-to-talk · M mute</div>
+      <div class="hud-prompt" hidden></div>
+      <div class="hud-help">WASD move · drag / Z·C camera · E use · 1 wave · 2 dance · Enter chat · V talk · M mute</div>
     `;
     parent.appendChild(el);
     this.areaEl = el.querySelector(".hud-area")!;
     this.fpsEl = el.querySelector(".hud-fps")!;
     this.countEl = el.querySelector(".hud-count")!;
+    this.promptEl = el.querySelector(".hud-prompt")!;
+  }
+
+  /** "Press E" hint for the nearby object; `available: false` shows it greyed out (e.g. full). */
+  setPrompt(text: string | null, available = true): void {
+    const key = `${text}|${available}`;
+    if (key === this.lastPrompt) return;
+    this.lastPrompt = key;
+    this.promptEl.hidden = !text;
+    this.promptEl.classList.toggle("unavailable", !available);
+    this.promptEl.innerHTML = "";
+    if (!text) return;
+    if (available) {
+      const kbd = document.createElement("kbd");
+      kbd.textContent = "E";
+      this.promptEl.append(kbd, " ");
+    }
+    this.promptEl.append(text);
   }
 
   setPlayerCount(count: number): void {

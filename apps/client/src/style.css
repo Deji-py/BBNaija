@@ -223,3 +223,89 @@ canvas:active {
     bottom: 96px;
   }
 }
+
+/* --- Interaction prompt --- */
+.hud-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 22%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgb(15 15 25 / 0.7);
+  font-size: 15px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.hud-prompt[hidden] {
+  display: none;
+}
+.hud-prompt.unavailable {
+  opacity: 0.65;
+}
+.hud-prompt kbd {
+  display: inline-block;
+  min-width: 1.4em;
+  margin-right: 4px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: #fff;
+  color: #1d1b29;
+  font: 700 13px system-ui, sans-serif;
+  text-align: center;
+}
+
+/* --- Chat --- */
+.chat {
+  position: absolute;
+  left: 16px;
+  bottom: 56px;
+  width: min(360px, calc(100% - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 4;
+}
+.chat-list {
+  max-height: 180px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: 14px;
+  line-height: 1.35;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+  overflow-wrap: anywhere;
+  mask-image: linear-gradient(to bottom, transparent, #000 30px);
+}
+.chat-list li {
+  padding: 1px 0;
+}
+.chat-list b {
+  font-weight: 700;
+  /* Lighten the player's colour so even dark shirt colours stay readable on the scene. */
+  color: color-mix(in srgb, var(--c) 55%, white);
+}
+.chat-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: rgb(15 15 25 / 0.45);
+  color: #fff;
+  font-size: 14px;
+}
+.chat-input::placeholder {
+  color: rgb(255 255 255 / 0.6);
+}
+.chat.typing .chat-input {
+  background: rgb(15 15 25 / 0.85);
+  border-color: #7b6cf6;
+  outline: none;
+}
+@media (max-width: 600px) {
+  .chat {
+    bottom: 140px;
+  }
+}

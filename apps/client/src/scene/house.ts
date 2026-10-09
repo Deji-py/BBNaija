@@ -20,6 +20,36 @@ export interface House {
   root: THREE.Group;
   /** Meshes that should block the camera (walls and fences). */
   cameraBlockers: THREE.Object3D[];
+  /** Switch the TV screen on/off. Call `animate` each frame for the "picture". */
+  tv: TvScreen;
+}
+
+/** The TV picture: dark when off, slowly shifting colours when on. */
+export class TvScreen {
+  private on = false;
+  private time = 0;
+  private readonly material: THREE.MeshStandardMaterial;
+
+  constructor(readonly mesh: THREE.Mesh) {
+    this.material = new THREE.MeshStandardMaterial({ color: 0x111418, flatShading: true });
+    mesh.material = this.material;
+  }
+
+  setOn(on: boolean): void {
+    this.on = on;
+    if (!on) {
+      this.material.color.set(0x111418);
+      this.material.emissive.set(0x000000);
+    }
+  }
+
+  animate(dt: number): void {
+    if (!this.on) return;
+    this.time += dt;
+    const hue = (this.time * 0.05) % 1;
+    this.material.color.setHSL(hue, 0.6, 0.5);
+    this.material.emissive.setHSL(hue, 0.7, 0.25 + Math.sin(this.time * 7) * 0.03);
+  }
 }
 
 /** Builds the whole house from the shared layout data. */
@@ -60,7 +90,8 @@ export function buildHouse(): House {
 
   for (const f of FURNITURE) root.add(buildFurniture(f));
 
-  return { root, cameraBlockers };
+  const screen = root.getObjectByName("tv-screen") as THREE.Mesh;
+  return { root, cameraBlockers, tv: new TvScreen(screen) };
 }
 
 /**
@@ -94,7 +125,8 @@ function buildFurniture(f: Furniture): THREE.Group {
     case "tv": {
       g.add(box(w, 0.5, d, DARK_WOOD));
       g.add(box(w * 0.9, 1.0, 0.08, 0x111111, 0, 0.6));
-      const screen = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.85, 0.9), mat(0x3a6ea5, { emissive: 0x1a3550 }));
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.85, 0.9));
+      screen.name = "tv-screen";
       screen.position.set(0, 1.1, 0.045);
       g.add(screen);
       break;

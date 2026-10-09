@@ -3,3 +3,4 @@ export * from "./types.js";
 export * from "./house.js";
 export * from "./movement.js";
 export * from "./protocol.js";
+export * from "./interactions.js";

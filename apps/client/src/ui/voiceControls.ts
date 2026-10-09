@@ -1,3 +1,5 @@
+import { isTyping } from "../input/keyboard.js";
+
 const STORAGE_KEY = "bbn:voice";
 
 export type MicMode = "open" | "ptt";
@@ -132,9 +134,4 @@ function load(): Saved {
   } catch {
     return { mode: "open", muted: false };
   }
-}
-
-function isTyping(e: KeyboardEvent): boolean {
-  const t = e.target as HTMLElement | null;
-  return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
 }

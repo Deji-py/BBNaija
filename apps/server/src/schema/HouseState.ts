@@ -19,6 +19,7 @@ export const Player = schema(
     voice: t.boolean(),
     speaking: t.boolean(),
     muted: t.boolean(),
+    activity: t.string(),
   },
   "Player",
 );
@@ -27,6 +28,7 @@ export type Player = SchemaType<typeof Player>;
 export const HouseState = schema(
   {
     players: t.map(Player),
+    tvOn: t.boolean(),
   },
   "HouseState",
 );

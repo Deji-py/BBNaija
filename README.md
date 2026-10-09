@@ -13,7 +13,8 @@ The full build specification lives in [SPEC.md](SPEC.md).
 | M1 — Solo house & character | ✅ done |
 | M2 — Multiplayer sync | ✅ done |
 | M3 — Proximity voice | ✅ done |
-| M4 — Chat, emotes & interactions | ⏳ next |
+| M4 — Chat, emotes & interactions | ✅ done |
+| M5 — Spectator mode | ⏳ next |
 
 ## Requirements
 
@@ -80,8 +81,15 @@ It prints a `https://<random>.trycloudflare.com` URL — open that on every mach
 |---|---|
 | W A S D / arrow keys | Move (relative to the camera) |
 | Drag with the mouse | Orbit / tilt the camera |
-| Q / E | Turn the camera left / right |
+| Z / C | Turn the camera left / right |
 | Mouse wheel | Zoom |
+| E | Use the object you're next to (a prompt appears) — or get up again |
+| 1 / 2 | Wave / dance (2 again, or moving, stops dancing) |
+| Enter | Chat (Enter sends, Esc cancels) |
+
+**Things to use:** sofa (3 seats), Diary Room chair, beds (sleep), stove (cook), treadmills (run), pool (swim, up to 6), and the TV (on/off for everyone). Walking away gets you up automatically.
+
+**Chat:** house-wide, max 280 characters, up to 3 messages in a burst then one every 1.5 s. Messages show in the panel and as a bubble over the sender's head; people who join later see the last 50.
 
 
 
@@ -101,7 +109,9 @@ packages/shared  Types and constants shared by client and server (@bbn/shared)
 
 Inside `apps/client/src`: `scene/` (renderer, house builder, follow camera), `entities/` (avatar, name tags, voice badges), `net/` (connection, prediction, interpolation), `voice/` (VoiceProvider interface, WebRTC mesh, spatial audio, mic), `input/`, `ui/` (lobby, HUD, voice controls), `modes/` (the game loop per mode).
 
-Inside `apps/server/src`: `rooms/HouseRoom.ts` (the authoritative room), `schema/` (synced state). `apps/server/scripts/bot.ts` is the bot used by `pnpm bots`.
+Inside `apps/server/src`: `rooms/HouseRoom.ts` (the authoritative room), `schema/` (synced state), `systems/` (chat log & rate limiting).
+
+Interactable objects (seats, exit spots, ranges) are defined in `packages/shared/src/interactions.ts`, next to the house layout. `apps/server/scripts/bot.ts` is the bot used by `pnpm bots`.
 
 ### How multiplayer works
 

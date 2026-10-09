@@ -26,6 +26,12 @@ export class LocalPlayerController {
   private predicted: Vec2;
   private accumulator = 0;
   private dir = { dx: 0, dz: 0 };
+  /**
+   * While we're using an object (sitting, in bed…), where we'll stand when we
+   * next move. The server does the same "stand up, then step" on our first
+   * movement input, so predicting it keeps getting up instant and correction-free.
+   */
+  private exit: Vec2 | null = null;
 
   constructor(
     start: Vec2,
@@ -48,15 +54,27 @@ export class LocalPlayerController {
     }
     if (dx === 0 && dz === 0) return { ...this.predicted };
     const partial = WALK_SPEED * this.accumulator;
-    return moveWithCollision(this.predicted, dx * partial, dz * partial);
+    const base = this.exit ?? this.predicted; // about to stand up: draw from where we'll stand
+    return moveWithCollision(base, dx * partial, dz * partial);
   }
 
-  /** Called whenever the server sends a new authoritative state for us. */
-  reconcile(serverX: number, serverZ: number, lastSeq: number): void {
+  /**
+   * Called whenever the server sends a new authoritative state for us.
+   * `exit` is where we'd stand up to if the server has us using an object.
+   */
+  reconcile(serverX: number, serverZ: number, lastSeq: number, exit: Vec2 | null): void {
     this.pending = this.pending.filter((input) => input.seq > lastSeq);
     let pos: Vec2 = { x: serverX, z: serverZ };
-    for (const input of this.pending) pos = applyInputStep(pos, input.dx, input.dz);
+    let pendingExit = exit;
+    for (const input of this.pending) {
+      if (pendingExit) {
+        pos = pendingExit;
+        pendingExit = null;
+      }
+      pos = applyInputStep(pos, input.dx, input.dz);
+    }
     this.predicted = pos;
+    this.exit = pendingExit;
   }
 
   private step(): void {
@@ -64,6 +82,10 @@ export class LocalPlayerController {
     if (dx === 0 && dz === 0) return; // standing still: nothing to send
     const input: InputMessage = { seq: ++this.seq, dx, dz };
     this.pending.push(input);
+    if (this.exit) {
+      this.predicted = this.exit;
+      this.exit = null;
+    }
     this.predicted = applyInputStep(this.predicted, dx, dz);
     this.send(input);
   }

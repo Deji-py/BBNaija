@@ -1,14 +1,21 @@
 import { Room, type Client } from "colyseus";
 import {
   AVATAR_COLORS,
+  EMOTES,
+  INTERACTABLE_BY_ID,
   MAX_HOUSEMATES,
   MAX_SDP_LENGTH,
   Msg,
   NAME_MAX_LENGTH,
   SPAWN_POINT,
   TICK_RATE_HZ,
+  activityExit,
   applyInputStep,
   areaAt,
+  chooseSlot,
+  distanceToObject,
+  type AnimState,
+  type EmoteName,
   type InputMessage,
   type JoinOptions,
   type VoiceSignalMessage,
@@ -16,6 +23,7 @@ import {
   type VoiceStateMessage,
 } from "@bbn/shared";
 import { HouseState, Player } from "../schema/HouseState.js";
+import { ChatLog } from "../systems/chat.js";
 
 /** Inputs a client may have waiting before we start dropping them. */
 const MAX_QUEUED_INPUTS = 10;
@@ -35,11 +43,15 @@ const MAX_INPUT_CREDIT = 4;
 const JITTER_BUFFER_TARGET = 2;
 /** Ticks a player keeps the "walk" animation after their last step, so it doesn't flicker. */
 const WALK_GRACE_TICKS = 2;
+/** How long a wave lasts. Dancing continues until you move or emote again. */
+const WAVE_TICKS = Math.round(2.5 * TICK_RATE_HZ);
 
 interface PlayerSim {
   queue: InputMessage[];
   credit: number;
   ticksSinceStep: number;
+  emote: EmoteName | null;
+  emoteTicksLeft: number;
 }
 
 /**
@@ -54,8 +66,11 @@ export class HouseRoom extends Room<{ state: HouseState }> {
   override maxMessagesPerSecond = 60;
 
   private readonly sims = new Map<string, PlayerSim>();
+  private readonly chat = new ChatLog();
 
   override onCreate(): void {
+    this.state.tvOn = false;
+
     this.onMessage(Msg.input, (client, message: unknown) => {
       const input = parseInput(message);
       const sim = this.sims.get(client.sessionId);
@@ -84,6 +99,36 @@ export class HouseRoom extends Room<{ state: HouseState }> {
       if (player.muted !== state.muted) player.muted = state.muted;
     });
 
+    this.onMessage(Msg.action, (client, message: unknown) => {
+      const objectId = (message as { objectId?: unknown } | null)?.objectId;
+      if (typeof objectId === "string") this.handleAction(client.sessionId, objectId);
+    });
+
+    this.onMessage(Msg.emote, (client, message: unknown) => {
+      const name = (message as { name?: unknown } | null)?.name;
+      const player = this.state.players.get(client.sessionId);
+      const sim = this.sims.get(client.sessionId);
+      if (!player || !sim || !EMOTES.includes(name as EmoteName) || player.activity) return;
+      if (name === "dance" && sim.emote === "dance") {
+        sim.emote = null; // pressing dance again stops dancing
+      } else {
+        sim.emote = name as EmoteName;
+        sim.emoteTicksLeft = name === "wave" ? WAVE_TICKS : Infinity;
+      }
+      this.updateAnim(player, sim);
+    });
+
+    this.onMessage(Msg.chat, (client, message: unknown) => {
+      const player = this.state.players.get(client.sessionId);
+      const text = ChatLog.sanitize((message as { text?: unknown } | null)?.text);
+      if (!player || !text || !this.chat.allow(client.sessionId)) return;
+      this.broadcast(Msg.chat, this.chat.add(player, text));
+    });
+
+    this.onMessage(Msg.chatHistory, (client) => {
+      client.send(Msg.chatHistory, this.chat.recent());
+    });
+
     this.setSimulationInterval(() => this.tick(), 1000 / TICK_RATE_HZ);
     console.log(`[house ${this.roomId}] created`);
   }
@@ -104,9 +149,16 @@ export class HouseRoom extends Room<{ state: HouseState }> {
     player.voice = options.voice === true;
     player.speaking = false;
     player.muted = true;
+    player.activity = "";
 
     this.state.players.set(client.sessionId, player);
-    this.sims.set(client.sessionId, { queue: [], credit: MAX_INPUT_CREDIT, ticksSinceStep: WALK_GRACE_TICKS });
+    this.sims.set(client.sessionId, {
+      queue: [],
+      credit: MAX_INPUT_CREDIT,
+      ticksSinceStep: WALK_GRACE_TICKS,
+      emote: null,
+      emoteTicksLeft: 0,
+    });
     console.log(`[house ${this.roomId}] ${player.name} joined (${this.state.players.size}/${this.maxClients})`);
   }
 
@@ -114,6 +166,7 @@ export class HouseRoom extends Room<{ state: HouseState }> {
     const player = this.state.players.get(client.sessionId);
     this.state.players.delete(client.sessionId);
     this.sims.delete(client.sessionId);
+    this.chat.forget(client.sessionId);
     console.log(`[house ${this.roomId}] ${player?.name ?? client.sessionId} left`);
   }
 
@@ -134,6 +187,66 @@ export class HouseRoom extends Room<{ state: HouseState }> {
     return slots.find((s) => players.every((p) => Math.hypot(p.x - s.x, p.z - s.z) > 0.8)) ?? slots[0]!;
   }
 
+  /**
+   * Press E near an object. The server re-checks everything the client's prompt
+   * showed (distance, free spot) because clients can't be trusted.
+   */
+  private handleAction(playerId: string, objectId: string): void {
+    const player = this.state.players.get(playerId);
+    const sim = this.sims.get(playerId);
+    const it = INTERACTABLE_BY_ID.get(objectId);
+    if (!player || !sim || !it) return;
+
+    // E while using something = get up.
+    if (player.activity) {
+      if (player.activity === objectId) this.standUp(player, sim);
+      return;
+    }
+    if (distanceToObject(objectId, player.x, player.z) > it.range) return;
+
+    if (it.kind === "toggle") {
+      this.state.tvOn = !this.state.tvOn;
+      return;
+    }
+
+    const occupied = [...this.state.players.values()].filter((p) => p.activity === objectId);
+    const slot = chooseSlot(it, player, occupied);
+    if (!slot) return; // full
+
+    // Drop movement still queued from before pressing E, and tell the client we've
+    // handled it so its prediction doesn't replay those steps.
+    const last = sim.queue.at(-1);
+    if (last) player.lastSeq = last.seq;
+    sim.queue.length = 0;
+    sim.emote = null;
+
+    player.x = slot.x;
+    player.z = slot.z;
+    player.rotY = slot.rotY;
+    player.activity = objectId;
+    this.updateAnim(player, sim);
+  }
+
+  private standUp(player: Player, sim: PlayerSim): void {
+    const exit = activityExit(player.activity, player.x, player.z);
+    if (exit) {
+      player.x = exit.x;
+      player.z = exit.z;
+    }
+    player.activity = "";
+    this.updateAnim(player, sim);
+  }
+
+  /** What a player's animation should be. Activity beats emote beats walk/idle. */
+  private updateAnim(player: Player, sim: PlayerSim): void {
+    let anim: AnimState;
+    const it = player.activity ? INTERACTABLE_BY_ID.get(player.activity) : undefined;
+    if (it && it.kind !== "toggle") anim = it.activity;
+    else if (sim.emote) anim = sim.emote;
+    else anim = sim.ticksSinceStep < WALK_GRACE_TICKS ? "walk" : "idle";
+    if (player.anim !== anim) player.anim = anim;
+  }
+
   /** One server tick: apply queued inputs to each player within their movement budget. */
   private tick(): void {
     for (const [id, sim] of this.sims) {
@@ -141,14 +254,18 @@ export class HouseRoom extends Room<{ state: HouseState }> {
       if (!player) continue;
 
       sim.credit = Math.min(sim.credit + 1, MAX_INPUT_CREDIT);
-      let pos = { x: player.x, z: player.z };
 
       const steps = sim.queue.length > JITTER_BUFFER_TARGET ? 2 : 1;
       for (let i = 0; i < steps && sim.credit >= 1 && sim.queue.length > 0; i++) {
         const input = sim.queue.shift()!;
         sim.credit -= 1;
-        pos = applyInputStep(pos, input.dx, input.dz);
         if (input.dx !== 0 || input.dz !== 0) {
+          // Moving gets you up off whatever you were using, and ends any emote.
+          if (player.activity) this.standUp(player, sim);
+          sim.emote = null;
+          const pos = applyInputStep({ x: player.x, z: player.z }, input.dx, input.dz);
+          if (pos.x !== player.x) player.x = pos.x;
+          if (pos.z !== player.z) player.z = pos.z;
           player.rotY = Math.atan2(input.dx, input.dz);
           sim.ticksSinceStep = -1;
         }
@@ -156,11 +273,9 @@ export class HouseRoom extends Room<{ state: HouseState }> {
       }
       sim.ticksSinceStep++;
 
-      if (pos.x !== player.x) player.x = pos.x;
-      if (pos.z !== player.z) player.z = pos.z;
-      const anim = sim.ticksSinceStep < WALK_GRACE_TICKS ? "walk" : "idle";
-      if (player.anim !== anim) player.anim = anim;
-      const area = areaAt(pos.x, pos.z)?.id ?? "";
+      if (sim.emote && --sim.emoteTicksLeft <= 0) sim.emote = null;
+      this.updateAnim(player, sim);
+      const area = areaAt(player.x, player.z)?.id ?? "";
       if (player.area !== area) player.area = area;
     }
   }

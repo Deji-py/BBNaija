@@ -1,6 +1,7 @@
 import { TICK_RATE_HZ } from "./constants.js";
 import { WALK_SPEED } from "./house.js";
 import { moveWithCollision, type Vec2 } from "./movement.js";
+import type { Activity, EmoteName } from "./interactions.js";
 
 /** Max housemates in one house. P2P voice (M3) gets heavy beyond ~8. */
 export const MAX_HOUSEMATES = 8;
@@ -44,7 +45,41 @@ export const Msg = {
   input: "input",
   voiceSignal: "voice:signal",
   voiceState: "voice:state",
+  /** Client → server: use (or stop using) an object. */
+  action: "action",
+  emote: "emote",
+  /** Client → server: send a chat line. Server → clients: a chat line to show. */
+  chat: "chat",
+  /** Client → server: request recent chat. Server → client: the recent chat lines. */
+  chatHistory: "chat:history",
 } as const;
+
+export interface ActionMessage {
+  objectId: string;
+}
+
+export interface EmoteMessage {
+  name: EmoteName;
+}
+
+export const CHAT_MAX_LENGTH = 280;
+/** How many recent chat lines the server keeps for people who join later. */
+export const CHAT_HISTORY_SIZE = 50;
+
+export interface ChatSendMessage {
+  text: string;
+}
+
+export interface ChatMessage {
+  /** Increasing id, unique within the room. */
+  id: number;
+  fromId: string;
+  name: string;
+  color: string;
+  text: string;
+  /** Server time (ms since epoch). */
+  at: number;
+}
 
 /** WebRTC session description exchanged when two housemates set up a voice link. */
 export interface VoiceSignalData {
@@ -93,8 +128,8 @@ export function applyInputStep(pos: Vec2, dx: number, dz: number): Vec2 {
   return moveWithCollision(pos, dx * dist, dz * dist);
 }
 
-/** Animation a player is in. Only idle/walk exist until M4 adds interactions and emotes. */
-export type AnimState = "idle" | "walk";
+/** Animation a player is in: moving, an emote, or an activity with an object. */
+export type AnimState = "idle" | "walk" | EmoteName | Activity;
 
 /**
  * Read-only view of the synced room state, as seen by clients.
@@ -115,8 +150,11 @@ export interface PlayerView {
   voice: boolean;
   speaking: boolean;
   muted: boolean;
+  /** Id of the object being used ("" when free). */
+  activity: string;
 }
 
 export interface HouseStateView {
   players: Map<string, PlayerView>;
+  tvOn: boolean;
 }
