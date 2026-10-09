@@ -34,8 +34,10 @@ export interface JoinOptions {
   color: string;
   /** Housemate (default), a spectator watching via /watch, or the Big Brother console. */
   role?: "housemate" | "viewer" | "admin";
-  /** Required for role "admin". */
+  /** Required for role "admin". In development it also lets bots join as test housemates without an account. */
   adminSecret?: string;
+  /** Signed-in user's session token. Required to enter as a housemate; optional for viewers (sets your chat name). */
+  sessionToken?: string;
   /** True for real browser clients that take part in voice chat (bots leave it off). For viewers: listen-only. */
   voice?: boolean;
 }
@@ -94,11 +96,16 @@ export const Msg = {
   adminLog: "admin:log",
 } as const;
 
-/** WebSocket close codes the server uses when it removes someone. */
+/**
+ * WebSocket close codes the server uses when it removes someone. Colyseus reserves
+ * 4000–4010 (e.g. 4001 server shutdown, 4002 error, 4010 may-reconnect), so ours live at 4500+.
+ */
 export const CloseCode = {
-  kicked: 4001,
+  kicked: 4501,
   /** The Big Brother console was opened somewhere else. */
-  consoleTakenOver: 4002,
+  consoleTakenOver: 4502,
+  /** The same account entered the house from another window. */
+  joinedElsewhere: 4503,
 } as const;
 
 export interface AnnouncementMessage {

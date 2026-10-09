@@ -31,6 +31,7 @@ import { MeshVoiceProvider } from "../voice/meshVoice.js";
 import { SpatialAudio } from "../voice/spatialAudio.js";
 import { applyVoiceRouting } from "../voice/voiceRouting.js";
 import { PlayersView } from "./playersView.js";
+import { adminApi } from "../net/api.js";
 
 /**
  * The Big Brother console (/bigbrother): watch the house like a viewer, plus
@@ -38,7 +39,13 @@ import { PlayersView } from "./playersView.js";
  * hold-to-talk button is held — the Diary Room button reaches just the
  * housemate in session, the house button reaches everyone.
  */
-export function startAdminMode(container: HTMLElement, room: HouseRoom, audioCtx: AudioContext, mic: MicResult): void {
+export function startAdminMode(
+  container: HTMLElement,
+  room: HouseRoom,
+  audioCtx: AudioContext,
+  mic: MicResult,
+  adminSecret: string,
+): void {
   container.classList.add("admin-mode");
   const { renderer, scene, camera } = setupScene(container);
   const house = buildHouse();
@@ -118,6 +125,7 @@ export function startAdminMode(container: HTMLElement, room: HouseRoom, audioCtx
     },
     mic.stream !== null,
     mic.stream ? undefined : mic.reason,
+    adminApi(adminSecret),
   );
   room.onMessage(Msg.adminLog, (entries: EventLogEntry[]) => panel.addLog(entries));
   room.onMessage(Msg.diaryChat, (msg: ChatMessage) => panel.diaryChat.add(msg));

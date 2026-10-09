@@ -7,7 +7,11 @@
 
 export type MicResult = { stream: MediaStream } | { stream: null; reason: string };
 
-export async function requestMic(ctx: AudioContext): Promise<MicResult> {
+/**
+ * @param skip resolves if the user chooses to go on without a mic (the browser's
+ *   permission prompt can otherwise wait forever if they ignore it).
+ */
+export async function requestMic(ctx: AudioContext, skip?: Promise<void>): Promise<MicResult> {
   // Dev-only: `?fakeMic` sends a test tone instead of the real mic, so voice can be
   // tested in two tabs on one machine without feedback or a microphone.
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("fakeMic")) {
@@ -17,10 +21,17 @@ export async function requestMic(ctx: AudioContext): Promise<MicResult> {
     return { stream: null, reason: "Microphone needs HTTPS (or localhost) — you can listen but not talk." };
   }
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
+    const request = navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       video: false,
     });
+    const skipped = skip?.then(() => null);
+    const stream = await (skipped ? Promise.race([request, skipped]) : request);
+    if (!stream) {
+      // If permission is granted later, release the mic straight away.
+      void request.then((s) => s.getTracks().forEach((t) => t.stop())).catch(() => {});
+      return { stream: null, reason: "You chose to continue without a microphone — you can listen but not talk." };
+    }
     return { stream };
   } catch (err) {
     const name = err instanceof DOMException ? err.name : "";

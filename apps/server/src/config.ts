@@ -1,7 +1,14 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
 const DEV_ADMIN_SECRET = "bigbrother";
-const isProduction = process.env.NODE_ENV === "production";
+export const isProduction = process.env.NODE_ENV === "production";
+
+/**
+ * Public address of the site, used to build sign-in links in emails. Required in
+ * production; in development links point at whatever origin asked for them.
+ */
+export const PUBLIC_URL = process.env.PUBLIC_URL;
+if (isProduction && !PUBLIC_URL) throw new Error("PUBLIC_URL must be set in production");
 
 /**
  * Secret for the Big Brother console (/bigbrother). Set ADMIN_SECRET in

@@ -14,6 +14,8 @@ const url = process.env.SERVER_URL ?? `http://localhost:${SERVER_PORT}`;
 for (let i = 0; i < count; i++) {
   const client = new Client(url);
   const room = await client.joinOrCreate(HOUSE_ROOM, {
+    // Bots are test housemates: in development the admin secret admits them without an account.
+    adminSecret: process.env.ADMIN_SECRET ?? "bigbrother",
     name: `Bot ${i + 1}`,
     color: AVATAR_COLORS[(i + 3) % AVATAR_COLORS.length],
   });

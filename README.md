@@ -16,7 +16,8 @@ The full build specification lives in [SPEC.md](SPEC.md).
 | M4 — Chat, emotes & interactions | ✅ done |
 | M5 — Spectator mode | ✅ done |
 | M6 — Big Brother console, tasks & Diary Room | ✅ done |
-| M7 — Accounts, seasons & applications | ⏳ next |
+| M7 — Accounts, seasons & applications | ✅ done |
+| M8 — Nominations, voting & evictions | ⏳ next |
 
 ## Requirements
 
@@ -36,14 +37,28 @@ pnpm install
 pnpm dev
 ```
 
-This starts both apps in parallel:
+`pnpm install` also builds the database client; `pnpm dev` applies any pending database migrations (a local SQLite file at `apps/server/data/house.db`) and starts both apps in parallel:
 
 | App | URL |
 |---|---|
 | Client (Vite) | http://localhost:5173 |
 | Game server (Colyseus) | port 2567 — the client reaches it through Vite at `/colyseus`; health check at http://localhost:2567/health |
 
-Open http://localhost:5173, pick a name and colour, and enter the house. Open a second browser window to see two housemates together.
+### Running a season (accounts, applications, selection)
+
+Only **selected housemates of the live season** can enter the house. To try the whole flow locally:
+
+1. Open **http://localhost:5173/bigbrother** (secret: see below) → **Season & applicants** tab → create a season and set it to **Taking applications**.
+2. Open **http://localhost:5173** → **Apply now** → sign in with any email. In development no email is sent: the sign-in link appears on the page (and in the server log) — click it.
+3. Fill in the application (18+ and all three consents are required). Use a second browser profile or a private window to sign in as someone else.
+4. In the console, **Select** applicants (up to the season's max), then set the season to **Live**.
+5. Selected housemates now see **Enter the house** on the landing page (`/house`). Everyone else can watch at `/watch` — no account needed; signing in just sets your viewer-chat name.
+
+Sign-in links work once, for 15 minutes; sessions last 30 days. Only one season can be taking applications or live at a time. ⚠️ Because development shows sign-in links on screen, **anyone who can reach your dev server can sign in as any email** — don't expose it publicly for long. Production refuses to show links and needs an email provider (M9).
+
+**Testing with bots:** `pnpm bots` still works without accounts — in development, bots present the admin secret and are admitted as test housemates (never in production).
+
+**Database tools:** `pnpm --filter @bbn/server db:studio` opens Prisma Studio to browse/edit data; `db:migrate` creates a migration after changing `apps/server/prisma/schema.prisma`. To start completely fresh, stop the server and delete `apps/server/data/`.
 
 ### Watching (spectator mode)
 
@@ -63,7 +78,7 @@ Open **http://localhost:5173/watch** and click **Start watching**. Viewers have 
 
 ### Big Brother console
 
-Open **http://localhost:5173/bigbrother** and enter the admin secret. Set it in `apps/server/.env` (copy `apps/server/.env.example`):
+Open **http://localhost:5173/bigbrother** and enter the admin secret. Two tabs: **Live** (everything below) and **Season & applicants** (create seasons, open applications, go live, review and select applicants). Set it in `apps/server/.env` (copy `apps/server/.env.example`):
 
 ```bash
 cp apps/server/.env.example apps/server/.env
@@ -80,7 +95,7 @@ Then edit `ADMIN_SECRET` in that file. Without a `.env`, development uses the se
 | End session / Broadcast to viewers | Release them; choose whether viewers can watch & hear (default: broadcast) |
 | **Mute** / **Kick** | Mute blocks their voice and house chat; kick removes them from the house |
 | Tasks | Start a task with a reward; the top scorer(s) win it |
-| Event log | Everything that happened (in memory until M7 adds the database) |
+| Event log | Everything that happened — saved to the database, reloaded on restart |
 | 1–6, 0, click a name | Cameras, free cam, follow — as on /watch |
 
 Talking stops automatically if the console window loses focus, so you can't stay on air by accident.
@@ -164,7 +179,7 @@ packages/shared  Types and constants shared by client and server (@bbn/shared)
 
 Inside `apps/client/src`: `scene/` (renderer, house builder, follow & spectator cameras), `entities/` (avatar, name tags, voice badges), `net/` (connection, prediction, interpolation), `voice/` (VoiceProvider interface, WebRTC mesh, spatial audio, mic), `input/`, `ui/` (lobby, HUD, voice controls), `modes/` (`housemate.ts`, `spectator.ts`, `admin.ts`, and `playersView.ts` which draws everyone from server state for all three).
 
-Inside `apps/server/src`: `rooms/HouseRoom.ts` (the authoritative room), `schema/` (synced state), `systems/` (chat log, rate limiting, tasks, event log), `config.ts` (admin secret).
+Inside `apps/server/src`: `rooms/HouseRoom.ts` (the authoritative room), `schema/` (synced state), `accounts/` (sign-in, seasons, applications), `http/routes.ts` (HTTP API), `db/` (Prisma client; schema in `apps/server/prisma/`), `systems/` (chat log, rate limiting, tasks, event log), `config.ts` (admin secret).
 
 Interactable objects (seats, exit spots, ranges) are defined in `packages/shared/src/interactions.ts`, next to the house layout. `apps/server/scripts/bot.ts` is the bot used by `pnpm bots`.
 
@@ -192,4 +207,6 @@ The house layout (`packages/shared/src/house.ts`) and the collision/movement cod
 |---|---|---|---|
 | `GAME_SERVER_PORT` | server, Vite proxy | `2567` | Port the game server listens on |
 | `ADMIN_SECRET` | server (`apps/server/.env`) | `bigbrother` in development only | Secret for the Big Brother console |
+| `DATABASE_URL` | server | `file:./data/house.db` | Database (SQLite locally; PostgreSQL from M9) |
+| `PUBLIC_URL` | server | — (required in production) | Site address used in sign-in emails |
 | `VITE_SERVER_URL` | client | `<page origin>/colyseus` | Override the game server URL |

@@ -6,12 +6,13 @@ html,
 body {
   margin: 0;
   height: 100%;
-  overflow: hidden;
   background: #12121a;
 }
-#app {
+/* The 3D modes fill the window; the plain pages (landing, apply…) scroll normally. */
+#app.game {
   position: fixed;
   inset: 0;
+  overflow: hidden;
 }
 canvas {
   display: block;
@@ -39,7 +40,7 @@ canvas:active {
   position: absolute;
   bottom: 16px;
   left: 16px;
-  max-width: calc(100% - 300px);
+  max-width: calc(100% - 360px);
   padding: 6px 14px;
   border-radius: 8px;
   background: rgb(15 15 25 / 0.45);
@@ -1023,4 +1024,283 @@ canvas:active {
   .admin-mode .chat.house-chat {
     display: none;
   }
+}
+
+/* --- Plain pages: landing, sign in, apply --- */
+.page {
+  min-height: 100vh;
+  background: radial-gradient(circle at 50% 0%, #2a2340, #12121a 60%);
+}
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 16px;
+}
+.brand {
+  color: #fff;
+  font-weight: 800;
+  font-size: 20px;
+  text-decoration: none;
+  letter-spacing: 0.02em;
+}
+.brand span {
+  color: #ff5c74;
+}
+.site-header nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.site-header nav a,
+.link-button {
+  color: #d9d5ef;
+  text-decoration: none;
+  font-size: 15px;
+}
+.site-header nav a:hover,
+.link-button:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+.site-header .who {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.muted-inline {
+  color: #a3a0b8;
+  font-size: 14px;
+}
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.page-main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 16px 16px 64px;
+  box-sizing: border-box;
+}
+.hero {
+  padding: 32px 0 16px;
+  text-align: center;
+}
+.hero h1 {
+  margin: 0 0 12px;
+  font-size: clamp(28px, 6vw, 44px);
+  line-height: 1.1;
+}
+.hero p {
+  color: #c9c5dd;
+  font-size: 17px;
+  line-height: 1.5;
+}
+.season-status {
+  color: #fff !important;
+  font-weight: 600;
+}
+.actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.button {
+  display: inline-block;
+  padding: 12px 20px;
+  border-radius: 10px;
+  background: #7b6cf6;
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+}
+.button.secondary {
+  background: #2c2942;
+}
+.center {
+  text-align: center;
+}
+.page-card {
+  width: 100%;
+  margin: 16px 0;
+}
+.page-card h2 {
+  margin: 0 0 8px;
+}
+.page-card .button {
+  margin-top: 4px;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stack button {
+  margin-top: 8px;
+}
+.field input:not([type="checkbox"]):not([type="radio"]),
+.field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid #3a3650;
+  border-radius: 8px;
+  background: #12111b;
+  color: #fff;
+  font: inherit;
+  font-size: 16px;
+}
+.field textarea {
+  resize: vertical;
+}
+.field input:focus,
+.field textarea:focus {
+  outline: 2px solid #7b6cf6;
+  outline-offset: 1px;
+}
+.consents .check {
+  align-items: flex-start;
+  margin: 8px 0;
+  line-height: 1.4;
+}
+.consents input {
+  margin-top: 3px;
+}
+.dev-box {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed #b3a8ff;
+  border-radius: 10px;
+}
+.dev-note {
+  margin: 0 0 10px;
+  color: #b3a8ff;
+  font-size: 14px;
+}
+
+/* --- Console: tabs and season admin --- */
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 12px;
+}
+.admin-tabs button {
+  flex: 1;
+}
+.admin-tabs button[aria-selected="true"] {
+  background: #7b6cf6 !important;
+  border-color: #7b6cf6 !important;
+}
+.season-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.season-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.season-list li.selected {
+  background: rgb(123 108 246 / 0.25);
+}
+.season-list li.empty {
+  color: #a3a0b8;
+  cursor: default;
+}
+.season-list .who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.season-list small {
+  color: #a3a0b8;
+  font-size: 12px;
+}
+.new-season {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.new-season input[name="name"] {
+  flex: 1;
+  min-width: 0;
+}
+.new-season input[name="max"] {
+  width: 56px;
+}
+.admin-error {
+  margin: 8px 0 0;
+}
+.applicants {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.applicant {
+  padding: 10px;
+  border-radius: 10px;
+  background: #1f1c2b;
+  border-left: 3px solid #a3a0b8;
+}
+.applicant.status-selected {
+  border-left-color: #2fbf71;
+}
+.applicant.status-rejected {
+  border-left-color: #d64545;
+  opacity: 0.75;
+}
+.applicant header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.applicant p {
+  margin: 4px 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.applicant .label {
+  color: #a3a0b8;
+}
+.applicant a {
+  color: #b3a8ff;
+}
+.badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #2c2942;
+  font-size: 12px;
+}
+.app-filter {
+  float: right;
+  padding: 2px 6px !important;
+  font-size: 12px !important;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.lobby-hint {
+  min-height: 1.2em;
+  margin: 10px 0 0;
+  color: #c9c5dd;
+  font-size: 14px;
+}
+.lobby-hint .link-button {
+  color: #b3a8ff;
+  text-decoration: underline;
 }

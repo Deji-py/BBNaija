@@ -9,6 +9,8 @@ import {
   type TaskType,
 } from "@bbn/shared";
 import { ChatPanel } from "./chat.js";
+import { SeasonAdmin } from "./adminSeasons.js";
+import type { adminApi } from "../net/api.js";
 import { statusOf } from "./spectatorHud.js";
 
 export type TalkTarget = "diary" | "house";
@@ -49,7 +51,13 @@ export class AdminPanel {
   private lastDiaryKey = "";
   private lastTaskKey = "";
 
-  constructor(parent: HTMLElement, private readonly handlers: AdminHandlers, hasMic: boolean, noMicReason?: string) {
+  constructor(
+    parent: HTMLElement,
+    private readonly handlers: AdminHandlers,
+    hasMic: boolean,
+    noMicReason: string | undefined,
+    seasonApi: ReturnType<typeof adminApi>,
+  ) {
     this.el = document.createElement("aside");
     this.el.className = "admin-panel";
     this.el.setAttribute("aria-label", "Big Brother controls");
@@ -61,8 +69,13 @@ export class AdminPanel {
           <button type="button" class="talk-btn" data-target="house">📣 Hold to talk: whole house <kbd>B</kbd></button>
           <p class="admin-note mic-note"></p>
         </div>
+        <div class="admin-tabs" role="tablist">
+          <button type="button" role="tab" data-tab="live" aria-selected="true">Live</button>
+          <button type="button" role="tab" data-tab="season" aria-selected="false">Season &amp; applicants</button>
+        </div>
       </header>
 
+      <div class="tab-live" role="tabpanel">
       <section>
         <h2>Announcement</h2>
         <form class="announce-form">
@@ -103,6 +116,8 @@ export class AdminPanel {
         <h2>Event log</h2>
         <ol class="event-log"></ol>
       </section>
+      </div>
+      <div class="tab-season" role="tabpanel" hidden></div>
     `;
     parent.appendChild(this.el);
 
@@ -117,6 +132,17 @@ export class AdminPanel {
     this.log = $(".event-log");
     this.micNote = $(".mic-note");
     this.talkButtons = { diary: $('[data-target="diary"]'), house: $('[data-target="house"]') };
+
+    // Tabs: live controls vs. season & applicants.
+    const seasons = new SeasonAdmin($(".tab-season"), seasonApi);
+    this.el.querySelector(".admin-tabs")!.addEventListener("click", (e) => {
+      const tab = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-tab]")?.dataset.tab;
+      if (!tab) return;
+      for (const b of this.el.querySelectorAll<HTMLButtonElement>(".admin-tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+      $(".tab-live").hidden = tab !== "live";
+      $(".tab-season").hidden = tab !== "season";
+      if (tab === "season") void seasons.refresh();
+    });
 
     this.diaryChat = new ChatPanel($(".diary-chat-slot"), (text) => handlers.onDiaryChat(text), {
       className: "admin-diary-chat",

@@ -32,10 +32,12 @@ import {
   type VoicePeerLeft,
   type VoiceSignalRelay,
 } from "@bbn/shared";
-import { isAdminSecret } from "../config.js";
+import { isAdminSecret, isProduction } from "../config.js";
+import { userFromSession } from "../accounts/auth.js";
+import { housemateAccess } from "../accounts/seasons.js";
 import { HouseState, Player } from "../schema/HouseState.js";
 import { ChatLog } from "../systems/chat.js";
-import { EventLog } from "../systems/eventLog.js";
+import { eventLog } from "../systems/eventLog.js";
 import { RateLimiter } from "../systems/rateLimit.js";
 import { TaskRunner } from "../systems/tasks.js";
 import { field, parseInput, parseVoiceSignal, parseVoiceState, sanitizeColor, sanitizeName } from "./parse.js";
@@ -63,6 +65,15 @@ const WAVE_TICKS = Math.round(2.5 * TICK_RATE_HZ);
 
 /** How Big Brother appears in house chat and the Diary Room. */
 const BIG_BROTHER = { id: "bigbrother", name: "Big Brother", color: "#e0243b" } as const;
+
+/** What onAuth decided about a joining client (available as `client.auth` in onJoin). */
+interface JoinAuth {
+  role: "housemate" | "viewer" | "admin";
+  /** Signed-in account, if any. */
+  userId?: string;
+  /** Name from the account / application. */
+  name?: string;
+}
 
 interface Viewer {
   name: string;
@@ -100,14 +111,34 @@ export class HouseRoom extends Room<{ state: HouseState }> {
   private readonly viewers = new Map<string, Viewer>();
   private readonly viewerChat = new ChatLog();
   private readonly reactionLimiter = new RateLimiter(5, 300);
-  private readonly events = new EventLog((entry) => this.sendToAdmin(Msg.adminLog, [entry]));
+  private readonly events = eventLog;
+  private unsubscribeLog: () => void = () => {};
   private tasks!: TaskRunner;
   private diaryChatId = 1;
 
-  /** Only the Big Brother console needs a check; everyone else may join (limits are applied in onJoin). */
-  override onAuth(_client: Client, options: Partial<JoinOptions> = {}): boolean {
-    if (options.role === "admin" && !isAdminSecret(options.adminSecret)) throw new Error("Wrong admin secret");
-    return true;
+  /** Session ids by account, so one account can't be in the house twice. */
+  private readonly sessionByUser = new Map<string, string>();
+
+  /**
+   * Who may join as what:
+   * - console: the admin secret;
+   * - housemate: a signed-in user selected for the live season (in development,
+   *   the admin secret also admits test housemates such as `pnpm bots`);
+   * - viewer: anyone (signing in just sets your viewer-chat name).
+   */
+  override async onAuth(_client: Client, options: Partial<JoinOptions> = {}): Promise<JoinAuth> {
+    if (options.role === "admin") {
+      if (!isAdminSecret(options.adminSecret)) throw new Error("Wrong admin secret");
+      return { role: "admin" };
+    }
+    const user = await userFromSession(options.sessionToken);
+    if (options.role === "viewer") return { role: "viewer", userId: user?.id, name: user?.displayName ?? undefined };
+
+    if (!isProduction && isAdminSecret(options.adminSecret)) return { role: "housemate" }; // dev test housemate
+    if (!user) throw new Error("Please sign in to enter the house");
+    const access = await housemateAccess(user.id);
+    if (!access) throw new Error("Only selected housemates of the live season can enter the house");
+    return { role: "housemate", userId: user.id, name: access.displayName };
   }
 
   override onCreate(): void {
@@ -133,20 +164,27 @@ export class HouseRoom extends Room<{ state: HouseState }> {
     this.registerViewerMessages();
     this.registerAdminMessages();
 
+    this.unsubscribeLog = eventLog.subscribe((entry) => this.sendToAdmin(Msg.adminLog, [entry]));
+
     this.setSimulationInterval(() => this.tick(), 1000 / TICK_RATE_HZ);
     // Clients line their countdowns up with this.
     this.clock.setInterval(() => (this.state.serverTime = Date.now()), 1000);
     this.events.add("room", "House opened");
   }
 
-  override onJoin(client: Client, options: Partial<JoinOptions> = {}): void {
-    if (options.role === "admin") return this.joinAdmin(client);
-    if (options.role === "viewer") return this.joinViewer(client, options);
-    if (this.state.players.size >= MAX_HOUSEMATES) throw new Error("The house is full");
+  override onJoin(client: Client, options: Partial<JoinOptions> = {}, auth?: JoinAuth): void {
+    if (auth?.role === "admin") return this.joinAdmin(client);
+    if (auth?.role === "viewer") return this.joinViewer(client, { ...options, name: auth.name ?? options.name });
+
+    // Same account entering again (e.g. a second tab): the newest window wins.
+    const previous = auth?.userId ? this.sessionByUser.get(auth.userId) : undefined;
+    if (previous) this.clients.getById(previous)?.leave(CloseCode.joinedElsewhere);
+    else if (this.state.players.size >= MAX_HOUSEMATES) throw new Error("The house is full");
+    if (auth?.userId) this.sessionByUser.set(auth.userId, client.sessionId);
 
     const player = new Player();
     player.id = client.sessionId;
-    player.name = sanitizeName(options.name);
+    player.name = sanitizeName(auth?.name ?? options.name);
     player.color = sanitizeColor(options.color);
 
     const spawn = this.freeSpawnPoint();
@@ -201,6 +239,7 @@ export class HouseRoom extends Room<{ state: HouseState }> {
     }
 
     const player = this.state.players.get(id);
+    for (const [userId, sessionId] of this.sessionByUser) if (sessionId === id) this.sessionByUser.delete(userId);
     if (id === this.state.diaryHousemate) this.state.diaryHousemate = "";
     this.state.players.delete(id);
     this.sims.delete(id);
@@ -210,6 +249,7 @@ export class HouseRoom extends Room<{ state: HouseState }> {
   }
 
   override onDispose(): void {
+    this.unsubscribeLog();
     console.log(`[house ${this.roomId}] disposed`);
   }
 

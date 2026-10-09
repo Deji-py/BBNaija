@@ -1,0 +1,110 @@
+// Persistent data (M7). SQLite locally; PostgreSQL in production (M9) — same models.
+// SQLite has no enums, so status fields are strings; allowed values are listed in comments
+// and in packages/shared/src/accounts.ts.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  displayName  String?
+  isAdmin      Boolean       @default(false)
+  bannedAt     DateTime?
+  createdAt    DateTime      @default(now())
+  sessions     Session[]
+  applications Application[]
+  housemates   Housemate[]
+}
+
+/// One-time sign-in links. Only a hash of the token is stored.
+model LoginToken {
+  id        String    @id @default(cuid())
+  email     String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email])
+}
+
+/// Signed-in browsers. Only a hash of the session token is stored.
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+}
+
+model Season {
+  id            String        @id @default(cuid())
+  name          String
+  /// draft | applications | live | ended
+  status        String        @default("draft")
+  startsAt      DateTime?
+  endsAt        DateTime?
+  maxHousemates Int           @default(8)
+  createdAt     DateTime      @default(now())
+  applications  Application[]
+  housemates    Housemate[]
+  events        EventLog[]
+}
+
+model Application {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seasonId         String
+  season           Season    @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  displayName      String
+  country          String
+  bio              String
+  motivation       String
+  clipUrl          String?
+  availability     String
+  ageConfirmed     Boolean
+  consentBroadcast Boolean
+  consentRecording Boolean
+  consentRules     Boolean
+  /// pending | selected | rejected
+  status           String    @default("pending")
+  reviewedAt       DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@unique([userId, seasonId])
+}
+
+model Housemate {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seasonId  String
+  season    Season    @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  /// active | evicted | winner | removed
+  status    String    @default("active")
+  evictedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, seasonId])
+}
+
+model EventLog {
+  id        Int      @id @default(autoincrement())
+  seasonId  String?
+  season    Season?  @relation(fields: [seasonId], references: [id], onDelete: SetNull)
+  type      String
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([seasonId, createdAt])
+}

@@ -1,24 +1,18 @@
-import { createEndpoint, createRouter, defineRoom, defineServer } from "colyseus";
-import { HOUSE_ROOM, SERVER_PORT, type HealthResponse } from "@bbn/shared";
+import { defineRoom, defineServer } from "colyseus";
+import { WebSocketTransport } from "@colyseus/ws-transport";
+import { HOUSE_ROOM, SERVER_PORT } from "@bbn/shared";
 import { HouseRoom } from "./rooms/HouseRoom.js";
+import { routes } from "./http/routes.js";
+import { eventLog } from "./systems/eventLog.js";
 
 const port = Number(process.env.GAME_SERVER_PORT ?? SERVER_PORT);
-const startedAt = Date.now();
 
-// Small HTTP endpoints. Colyseus serves these on the same port as the
-// WebSocket game connection.
-const routes = createRouter({
-  health: createEndpoint("/health", { method: "GET" }, async (ctx) => {
-    const body: HealthResponse = {
-      ok: true,
-      name: "big-brother-ninja",
-      uptimeSec: Math.round((Date.now() - startedAt) / 1000),
-    };
-    return ctx.json(body);
-  }),
-});
+await eventLog.load();
 
 const gameServer = defineServer({
+  // Passed explicitly: Prisma's generated client sets a global `__dirname`, which makes
+  // Colyseus think it's running as CommonJS and fail to auto-load its default transport.
+  transport: new WebSocketTransport(),
   rooms: {
     [HOUSE_ROOM]: defineRoom(HouseRoom),
   },

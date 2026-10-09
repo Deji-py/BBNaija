@@ -1,0 +1,211 @@
+import { LIMITS, SEASON_STATUSES, isSafeHttpUrl, type AdminApplication, type AdminSeason } from "@bbn/shared";
+import type { adminApi } from "../net/api.js";
+
+type AdminApi = ReturnType<typeof adminApi>;
+
+const STATUS_LABEL: Record<string, string> = {
+  draft: "Draft",
+  applications: "Taking applications",
+  live: "Live",
+  ended: "Ended",
+};
+
+/**
+ * "Season" tab of the Big Brother console: create seasons, move them through
+ * draft → applications → live → ended, and review applicants. Talks to the
+ * HTTP admin API with the console's secret.
+ */
+export class SeasonAdmin {
+  private readonly el: HTMLElement;
+  private readonly seasonsEl: HTMLElement;
+  private readonly appsEl: HTMLElement;
+  private readonly errorEl: HTMLElement;
+  private readonly filterEl: HTMLSelectElement;
+  private seasons: AdminSeason[] = [];
+  private selectedSeason: string | null = null;
+
+  constructor(parent: HTMLElement, private readonly api: AdminApi) {
+    this.el = document.createElement("div");
+    this.el.className = "season-admin";
+    this.el.innerHTML = `
+      <section>
+        <h2>Seasons</h2>
+        <ul class="season-list"></ul>
+        <form class="new-season">
+          <input name="name" placeholder="New season name" maxlength="${LIMITS.seasonName}" required />
+          <input name="max" type="number" min="2" max="8" value="8" aria-label="Max housemates" title="Max housemates" />
+          <button type="submit">Create</button>
+        </form>
+        <p class="error admin-error" role="alert"></p>
+      </section>
+      <section>
+        <h2>Applicants <select class="app-filter" aria-label="Show">
+          <option value="all">All</option><option value="pending">Pending</option>
+          <option value="selected">Selected</option><option value="rejected">Rejected</option>
+        </select></h2>
+        <div class="applicants"><p class="admin-note">Pick a season above.</p></div>
+      </section>
+    `;
+    parent.appendChild(this.el);
+    this.seasonsEl = this.el.querySelector(".season-list")!;
+    this.appsEl = this.el.querySelector(".applicants")!;
+    this.errorEl = this.el.querySelector(".admin-error")!;
+    this.filterEl = this.el.querySelector(".app-filter")!;
+    this.filterEl.addEventListener("change", () => void this.loadApplicants());
+
+    const form = this.el.querySelector<HTMLFormElement>(".new-season")!;
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const name = (form.elements.namedItem("name") as HTMLInputElement).value.trim();
+      const max = Number((form.elements.namedItem("max") as HTMLInputElement).value);
+      void this.run(async () => {
+        await this.api.createSeason(name, max);
+        form.reset();
+      });
+    });
+
+    this.seasonsEl.addEventListener("change", (e) => {
+      const select = (e.target as HTMLElement).closest<HTMLSelectElement>("select[data-season]");
+      if (select) void this.run(() => this.api.setSeasonStatus(select.dataset.season!, select.value));
+    });
+    this.seasonsEl.addEventListener("click", (e) => {
+      const li = (e.target as HTMLElement).closest<HTMLElement>("li[data-season]");
+      if (!li || (e.target as HTMLElement).closest("select")) return;
+      this.selectedSeason = li.dataset.season!;
+      this.renderSeasons();
+      void this.loadApplicants();
+    });
+    this.appsEl.addEventListener("click", (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-decision]");
+      if (!b) return;
+      void this.run(() => this.api.decide(b.dataset.app!, b.dataset.decision as "selected" | "rejected" | "pending"));
+    });
+
+    void this.refresh();
+  }
+
+  /** Reload everything (also call when the tab is shown). */
+  async refresh(): Promise<void> {
+    try {
+      this.seasons = await this.api.seasons();
+      if (!this.selectedSeason || !this.seasons.some((s) => s.id === this.selectedSeason)) {
+        this.selectedSeason = this.seasons.find((s) => s.status === "applications" || s.status === "live")?.id ?? this.seasons[0]?.id ?? null;
+      }
+      this.renderSeasons();
+      await this.loadApplicants();
+    } catch (err) {
+      this.errorEl.textContent = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  private async run(action: () => Promise<unknown>): Promise<void> {
+    this.errorEl.textContent = "";
+    try {
+      await action();
+    } catch (err) {
+      this.errorEl.textContent = err instanceof Error ? err.message : String(err);
+    }
+    await this.refresh();
+  }
+
+  private renderSeasons(): void {
+    this.seasonsEl.replaceChildren(
+      ...this.seasons.map((s) => {
+        const li = document.createElement("li");
+        li.dataset.season = s.id;
+        li.classList.toggle("selected", s.id === this.selectedSeason);
+        const name = document.createElement("b");
+        name.textContent = s.name;
+        const meta = document.createElement("small");
+        meta.textContent = `${s.selectedCount}/${s.maxHousemates} selected · ${s.applicationCount} applied`;
+        const info = document.createElement("span");
+        info.className = "who";
+        info.append(name, meta);
+        const select = document.createElement("select");
+        select.dataset.season = s.id;
+        select.setAttribute("aria-label", `Status of ${s.name}`);
+        for (const st of SEASON_STATUSES) {
+          const o = document.createElement("option");
+          o.value = st;
+          o.textContent = STATUS_LABEL[st]!;
+          o.selected = st === s.status;
+          select.append(o);
+        }
+        li.append(info, select);
+        return li;
+      }),
+    );
+    if (!this.seasons.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No seasons yet — create one below.";
+      this.seasonsEl.append(li);
+    }
+  }
+
+  private async loadApplicants(): Promise<void> {
+    if (!this.selectedSeason) return;
+    const apps = await this.api.applications(this.selectedSeason);
+    const filter = this.filterEl.value;
+    const shown = apps.filter((a) => filter === "all" || a.status === filter);
+    this.appsEl.replaceChildren(...shown.map((a) => this.applicantCard(a)));
+    if (!shown.length) {
+      const p = document.createElement("p");
+      p.className = "admin-note";
+      p.textContent = apps.length ? "No applicants with that status." : "No applications yet.";
+      this.appsEl.append(p);
+    }
+  }
+
+  private applicantCard(a: AdminApplication): HTMLElement {
+    const el = document.createElement("article");
+    el.className = `applicant status-${a.status}`;
+    const head = document.createElement("header");
+    const name = document.createElement("b");
+    name.textContent = a.displayName;
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = a.status;
+    head.append(name, badge);
+
+    const meta = document.createElement("p");
+    meta.className = "admin-note";
+    meta.textContent = `${a.email} · ${a.country} · applied ${new Date(a.createdAt).toLocaleDateString()}`;
+
+    const field = (label: string, value: string) => {
+      const p = document.createElement("p");
+      const l = document.createElement("span");
+      l.className = "label";
+      l.textContent = `${label}: `;
+      p.append(l, document.createTextNode(value));
+      return p;
+    };
+    el.append(head, meta, field("Bio", a.bio), field("Why", a.motivation), field("Availability", a.availability));
+    if (a.clipUrl && isSafeHttpUrl(a.clipUrl)) {
+      const p = document.createElement("p");
+      const link = document.createElement("a");
+      link.href = a.clipUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Intro clip ↗";
+      p.append(link);
+      el.append(p);
+    }
+    el.append(field("Consents", a.ageConfirmed && a.consentBroadcast && a.consentRecording && a.consentRules ? "18+, broadcast, recording, rules ✓" : "incomplete"));
+
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
+    const btn = (decision: string, label: string) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.app = a.id;
+      b.dataset.decision = decision;
+      b.textContent = label;
+      b.disabled = a.status === decision;
+      return b;
+    };
+    actions.append(btn("selected", "Select"), btn("rejected", "Reject"), btn("pending", "Reset"));
+    el.append(actions);
+    return el;
+  }
+}

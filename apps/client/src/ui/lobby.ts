@@ -3,21 +3,27 @@ import { AVATAR_COLORS, NAME_MAX_LENGTH, type JoinOptions } from "@bbn/shared";
 const STORAGE_KEY = "bbn:lobby";
 
 /**
- * Name + colour picker shown before entering the house.
+ * Colour picker shown before entering the house. Your name comes from your
+ * application (the server uses it, whatever the client sends).
  * `onSubmit` should resolve when joined, or throw to show an error and let the user retry.
  */
-export function showLobby(parent: HTMLElement, onSubmit: (options: JoinOptions) => Promise<void>): void {
+/** Lets the join step show a hint (with an optional action) under the button while it waits. */
+export interface LobbyStatus {
+  hint(text: string, actionLabel?: string, onAction?: () => void): void;
+}
+
+export function showLobby(
+  parent: HTMLElement,
+  displayName: string,
+  onSubmit: (options: JoinOptions, status: LobbyStatus) => Promise<void>,
+): void {
   const saved = loadSaved();
   const el = document.createElement("div");
   el.className = "overlay";
   el.innerHTML = `
     <form class="card lobby">
-      <h1>Big Brother Ninja</h1>
-      <p class="muted">Pick a name and colour, then enter the house.</p>
-      <label class="field">
-        <span>Name</span>
-        <input name="name" required maxlength="${NAME_MAX_LENGTH}" autocomplete="nickname" placeholder="Your housemate name" />
-      </label>
+      <h1>Enter the house</h1>
+      <p class="muted">You're entering as <b class="entering-as"></b>. Pick your colour.</p>
       <fieldset class="field">
         <legend>Colour</legend>
         <div class="swatches">
@@ -27,40 +33,53 @@ export function showLobby(parent: HTMLElement, onSubmit: (options: JoinOptions) 
         </div>
       </fieldset>
       <button type="submit">Enter the house</button>
+      <p class="lobby-hint" role="status"></p>
       <p class="error" role="alert"></p>
-      <p class="switch-link">Just here to watch? <a href="/watch">Watch live →</a></p>
+      <p class="switch-link"><a href="/">← Back</a> · <a href="/watch">Watch instead</a></p>
     </form>
   `;
+  el.querySelector(".entering-as")!.textContent = displayName;
   parent.appendChild(el);
 
   const form = el.querySelector("form")!;
-  const nameInput = form.elements.namedItem("name") as HTMLInputElement;
   const button = form.querySelector("button")!;
   const errorEl = form.querySelector<HTMLElement>(".error")!;
-
-  nameInput.value = saved.name ?? "";
   const initialColor = AVATAR_COLORS.includes(saved.color as (typeof AVATAR_COLORS)[number])
     ? saved.color!
     : AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)]!;
   form.querySelector<HTMLInputElement>(`input[value="${initialColor}"]`)!.checked = true;
-  nameInput.focus();
+  button.focus();
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const options: JoinOptions = {
-      name: nameInput.value.trim(),
+      name: displayName,
       color: (form.elements.namedItem("color") as RadioNodeList).value,
     };
-    if (!options.name) return;
     save(options);
     button.disabled = true;
     button.textContent = "Entering…";
     errorEl.textContent = "";
+    const hintEl = form.querySelector<HTMLElement>(".lobby-hint")!;
+    const status: LobbyStatus = {
+      hint(text, actionLabel, onAction) {
+        hintEl.replaceChildren(document.createTextNode(text));
+        if (actionLabel && onAction) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "link-button";
+          b.textContent = actionLabel;
+          b.addEventListener("click", onAction, { once: true });
+          hintEl.append(" ", b);
+        }
+      },
+    };
     try {
-      await onSubmit(options);
+      await onSubmit(options, status);
       el.remove();
     } catch (err) {
       errorEl.textContent = describeError(err);
+      hintEl.textContent = "";
       button.disabled = false;
       button.textContent = "Enter the house";
     }
@@ -174,6 +193,7 @@ export function showDisconnected(parent: HTMLElement, message: string): void {
 function describeError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   if (/wrong admin secret/i.test(msg)) return "That secret isn't right.";
+  if (/sign in|selected housemates/i.test(msg)) return msg;
   if (/full|locked/i.test(msg)) return "The house is full right now. Try again later.";
   if (/fetch|network|connect|ECONNREFUSED/i.test(msg)) return "Can't reach the game server. Is it running?";
   return `Couldn't join: ${msg}`;

@@ -162,7 +162,9 @@ export function startHousemateMode(container: HTMLElement, room: HouseRoom, audi
       container,
       code === CloseCode.kicked
         ? "Big Brother has removed you from the house."
-        : code === 1000
+        : code === CloseCode.joinedElsewhere
+          ? "You entered the house from another window, so this one was closed."
+          : code === 1000
           ? "You left the house."
           : `Lost connection to the house (code ${code}).`,
     );
