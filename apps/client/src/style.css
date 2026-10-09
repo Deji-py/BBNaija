@@ -1,26 +1,65 @@
 :root {
-  color-scheme: dark;
   font-family: system-ui, -apple-system, sans-serif;
-  background: #12121a;
-  color: #e8e8f0;
+  color: #fff;
 }
+html,
 body {
   margin: 0;
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
+  height: 100%;
+  overflow: hidden;
+  background: #12121a;
 }
 #app {
-  text-align: center;
-  padding: 16px;
+  position: fixed;
+  inset: 0;
 }
-h1 {
-  margin: 0 0 4px;
+canvas {
+  display: block;
+  touch-action: none;
+  cursor: grab;
 }
-.sub {
-  margin: 0 0 24px;
-  color: #8a8aa0;
+canvas:active {
+  cursor: grabbing;
 }
-.pending { color: #d8b350; }
-.ok { color: #5fd38a; }
-.error { color: #ef6a6a; }
+
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.6);
+}
+.hud-area {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgb(15 15 25 / 0.55);
+  font-weight: 600;
+  font-size: 15px;
+}
+.hud-fps {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  font: 12px ui-monospace, monospace;
+  opacity: 0.8;
+}
+.hud-help {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: rgb(15 15 25 / 0.45);
+  font-size: 13px;
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  .hud-help {
+    white-space: normal;
+    width: calc(100% - 64px);
+    text-align: center;
+  }
+}

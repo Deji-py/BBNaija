@@ -10,7 +10,8 @@ The full build specification lives in [SPEC.md](SPEC.md).
 | Milestone | State |
 |---|---|
 | M0 — Project setup | ✅ done |
-| M1 — Solo house & character | ⏳ next |
+| M1 — Solo house & character | ✅ done |
+| M2 — Multiplayer sync | ⏳ next |
 
 ## Requirements
 
@@ -37,7 +38,18 @@ This starts both apps in parallel:
 | Client (Vite) | http://localhost:5173 |
 | Game server (Colyseus) | ws://localhost:2567 — health check at http://localhost:2567/health |
 
-The client page shows **Game server: online** when it can reach the server.
+Open http://localhost:5173 to walk around the house (solo until M2).
+
+### Controls
+
+| Input | Action |
+|---|---|
+| W A S D / arrow keys | Move (relative to the camera) |
+| Drag with the mouse | Orbit / tilt the camera |
+| Q / E | Turn the camera left / right |
+| Mouse wheel | Zoom |
+
+Optional URL params: `?name=Ada&color=3fa7d6` sets the name tag and shirt colour (hex without `#`).
 
 Other scripts:
 
@@ -48,10 +60,14 @@ pnpm typecheck   # strict TypeScript check of every package
 ## Layout
 
 ```
-apps/client      Vite + TypeScript browser client (Three.js arrives in M1)
+apps/client      Vite + TypeScript + Three.js browser client
 apps/server      Node + TypeScript + Colyseus authoritative game server
 packages/shared  Types and constants shared by client and server (@bbn/shared)
 ```
+
+Inside `apps/client/src`: `scene/` (renderer, house builder, follow camera), `entities/` (avatar, name tags), `input/`, `ui/` (HUD), `modes/` (the game loop per mode).
+
+The house layout (`packages/shared/src/house.ts`) and the collision/movement code (`packages/shared/src/movement.ts`) live in the shared package so the server can run the exact same rules once it becomes authoritative in M2.
 
 `@bbn/shared` is consumed as TypeScript source directly — Vite (client) and tsx (server) compile it on the fly, so there is no build step during development.
 

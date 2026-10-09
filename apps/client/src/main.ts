@@ -1,18 +1,10 @@
-import type { HealthResponse } from "@bbn/shared";
-import { SERVER_HTTP_URL } from "./config.js";
+import { startHousemateMode } from "./modes/housemate.js";
+import "./style.css";
 
-const statusEl = document.querySelector<HTMLSpanElement>("#server-status")!;
+// M1: solo mode. The lobby (name + colour picker) arrives with multiplayer in M2;
+// until then `?name=` and `?color=` in the URL override the defaults.
+const params = new URLSearchParams(location.search);
+const name = params.get("name")?.slice(0, 20) || "Housemate";
+const color = params.get("color") ? `#${params.get("color")!.replace(/^#/, "")}` : "#e4572e";
 
-async function checkServer(): Promise<void> {
-  try {
-    const res = await fetch(`${SERVER_HTTP_URL}/health`);
-    const health = (await res.json()) as HealthResponse;
-    statusEl.textContent = `online (up ${health.uptimeSec}s)`;
-    statusEl.className = "ok";
-  } catch {
-    statusEl.textContent = `offline — is the server running on ${SERVER_HTTP_URL}?`;
-    statusEl.className = "error";
-  }
-}
-
-void checkServer();
+startHousemateMode(document.querySelector<HTMLElement>("#app")!, name, color);
