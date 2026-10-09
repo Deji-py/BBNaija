@@ -2,6 +2,7 @@ import { Room, type Client } from "colyseus";
 import {
   AVATAR_COLORS,
   MAX_HOUSEMATES,
+  MAX_SDP_LENGTH,
   Msg,
   NAME_MAX_LENGTH,
   SPAWN_POINT,
@@ -10,6 +11,9 @@ import {
   areaAt,
   type InputMessage,
   type JoinOptions,
+  type VoiceSignalMessage,
+  type VoiceSignalRelay,
+  type VoiceStateMessage,
 } from "@bbn/shared";
 import { HouseState, Player } from "../schema/HouseState.js";
 
@@ -60,6 +64,26 @@ export class HouseRoom extends Room<{ state: HouseState }> {
       sim.queue.push(input);
     });
 
+    // WebRTC signalling: the server never touches audio, it just forwards the
+    // connection offer/answer between two housemates so they can link up directly.
+    this.onMessage(Msg.voiceSignal, (client, message: unknown) => {
+      const signal = parseVoiceSignal(message);
+      if (!signal || signal.to === client.sessionId) return;
+      const sender = this.state.players.get(client.sessionId);
+      const target = this.clients.getById(signal.to);
+      if (!sender?.voice || !target || !this.state.players.get(signal.to)?.voice) return;
+      const relay: VoiceSignalRelay = { from: client.sessionId, data: signal.data };
+      target.send(Msg.voiceSignal, relay);
+    });
+
+    this.onMessage(Msg.voiceState, (client, message: unknown) => {
+      const state = parseVoiceState(message);
+      const player = this.state.players.get(client.sessionId);
+      if (!state || !player) return;
+      if (player.speaking !== state.speaking) player.speaking = state.speaking;
+      if (player.muted !== state.muted) player.muted = state.muted;
+    });
+
     this.setSimulationInterval(() => this.tick(), 1000 / TICK_RATE_HZ);
     console.log(`[house ${this.roomId}] created`);
   }
@@ -70,14 +94,16 @@ export class HouseRoom extends Room<{ state: HouseState }> {
     player.name = sanitizeName(options.name);
     player.color = sanitizeColor(options.color);
 
-    // Spread spawns in a small circle so new arrivals don't stack on top of each other.
-    const angle = (this.state.players.size / MAX_HOUSEMATES) * Math.PI * 2;
-    player.x = SPAWN_POINT.x + Math.sin(angle) * 1.2;
-    player.z = SPAWN_POINT.z + Math.cos(angle) * 1.2;
+    const spawn = this.freeSpawnPoint();
+    player.x = spawn.x;
+    player.z = spawn.z;
     player.rotY = Math.PI;
     player.anim = "idle";
     player.area = areaAt(player.x, player.z)?.id ?? "";
     player.lastSeq = 0;
+    player.voice = options.voice === true;
+    player.speaking = false;
+    player.muted = true;
 
     this.state.players.set(client.sessionId, player);
     this.sims.set(client.sessionId, { queue: [], credit: MAX_INPUT_CREDIT, ticksSinceStep: WALK_GRACE_TICKS });
@@ -93,6 +119,19 @@ export class HouseRoom extends Room<{ state: HouseState }> {
 
   override onDispose(): void {
     console.log(`[house ${this.roomId}] disposed`);
+  }
+
+  /**
+   * Spawn slots form a small circle around the spawn point, so new arrivals
+   * don't stack on top of each other. Takes the first slot nobody is standing on.
+   */
+  private freeSpawnPoint(): { x: number; z: number } {
+    const slots = Array.from({ length: MAX_HOUSEMATES }, (_, i) => {
+      const angle = (i / MAX_HOUSEMATES) * Math.PI * 2;
+      return { x: SPAWN_POINT.x + Math.sin(angle) * 1.2, z: SPAWN_POINT.z + Math.cos(angle) * 1.2 };
+    });
+    const players = [...this.state.players.values()];
+    return slots.find((s) => players.every((p) => Math.hypot(p.x - s.x, p.z - s.z) > 0.8)) ?? slots[0]!;
   }
 
   /** One server tick: apply queued inputs to each player within their movement budget. */
@@ -134,6 +173,23 @@ function parseInput(message: unknown): InputMessage | null {
   if (typeof dx !== "number" || typeof dz !== "number") return null;
   if (!Number.isFinite(dx) || !Number.isFinite(dz)) return null;
   return { seq, dx, dz };
+}
+
+function parseVoiceSignal(message: unknown): VoiceSignalMessage | null {
+  if (typeof message !== "object" || message === null) return null;
+  const { to, data } = message as Record<string, unknown>;
+  if (typeof to !== "string" || typeof data !== "object" || data === null) return null;
+  const { type, sdp } = data as Record<string, unknown>;
+  if (type !== "offer" && type !== "answer") return null;
+  if (typeof sdp !== "string" || sdp.length > MAX_SDP_LENGTH) return null;
+  return { to, data: { type, sdp } };
+}
+
+function parseVoiceState(message: unknown): VoiceStateMessage | null {
+  if (typeof message !== "object" || message === null) return null;
+  const { speaking, muted } = message as Record<string, unknown>;
+  if (typeof speaking !== "boolean" || typeof muted !== "boolean") return null;
+  return { speaking, muted };
 }
 
 function sanitizeName(raw: unknown): string {

@@ -1,0 +1,176 @@
+import { Msg, type VoiceSignalData, type VoiceSignalMessage, type VoiceSignalRelay } from "@bbn/shared";
+import type { HouseRoom } from "../net/connection.js";
+import type { SpatialAudio } from "./spatialAudio.js";
+import type { Vec3, VoiceProvider } from "./VoiceProvider.js";
+
+/** Public STUN server: lets peers discover their public address when not on the same network. */
+const ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+/** Longest we wait for ICE candidate gathering before sending what we have. */
+const ICE_GATHER_TIMEOUT_MS = 2000;
+const RETRY_DELAY_MS = 2000;
+const MAX_RETRIES = 3;
+
+interface Peer {
+  pc: RTCPeerConnection;
+  retries: number;
+}
+
+/**
+ * Peer-to-peer voice: every housemate holds one direct WebRTC connection to
+ * every other housemate (a "mesh"). Fine for up to ~8 people; beyond that each
+ * browser uploads too many copies of its voice, which is why M9 moves to LiveKit.
+ *
+ * Setting up a connection ("signalling") needs a go-between to swap an offer
+ * and an answer describing each side's audio and network addresses; that's the
+ * Colyseus room. To avoid both sides offering at once, only the player with the
+ * smaller session id makes the offer.
+ *
+ * ICE candidates (network addresses) are gathered first and sent inside the
+ * offer/answer ("non-trickle"), so each link needs just two messages.
+ */
+export class MeshVoiceProvider implements VoiceProvider {
+  private readonly peers = new Map<string, Peer>();
+  private localTrack: MediaStreamTrack | null = null;
+  private remoteStreamCb: ((id: string, stream: MediaStream) => void) | null = null;
+  private muted = true;
+  private active = false;
+
+  constructor(
+    private readonly room: HouseRoom,
+    private readonly audio: SpatialAudio,
+  ) {
+    room.onMessage(Msg.voiceSignal, (relay: VoiceSignalRelay) => void this.handleSignal(relay));
+  }
+
+  join(localStream: MediaStream | null): void {
+    this.localTrack = localStream?.getAudioTracks()[0] ?? null;
+    if (this.localTrack) this.localTrack.enabled = !this.muted;
+    this.active = true;
+  }
+
+  leave(): void {
+    this.active = false;
+    for (const id of [...this.peers.keys()]) this.removePeer(id);
+    this.localTrack?.stop();
+    this.localTrack = null;
+  }
+
+  setMuted(muted: boolean): void {
+    this.muted = muted;
+    // Disabling the track sends silence immediately, without renegotiating any connection.
+    if (this.localTrack) this.localTrack.enabled = !muted;
+  }
+
+  onRemoteStream(cb: (id: string, stream: MediaStream) => void): void {
+    this.remoteStreamCb = cb;
+  }
+
+  setListenerPosition(pos: Vec3, yaw: number): void {
+    this.audio.setListener(pos, yaw);
+  }
+
+  setSourcePosition(id: string, pos: Vec3): void {
+    this.audio.setSourcePosition(id, pos);
+  }
+
+  /** A voice-capable player is in the room (called for everyone already there, and newcomers). */
+  addPeer(id: string): void {
+    if (!this.active || id === this.room.sessionId || this.peers.has(id)) return;
+    if (this.room.sessionId < id) void this.connect(id);
+    // Otherwise we wait for their offer.
+  }
+
+  removePeer(id: string): void {
+    this.peers.get(id)?.pc.close();
+    this.peers.delete(id);
+    this.audio.detach(id);
+  }
+
+  /** Dev tooling: connection state per peer. */
+  debugStates(): Record<string, RTCPeerConnectionState> {
+    return Object.fromEntries([...this.peers].map(([id, p]) => [id, p.pc.connectionState]));
+  }
+
+  private createPeer(id: string, retries = 0): Peer {
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const peer: Peer = { pc, retries };
+    this.peers.set(id, peer);
+
+    pc.ontrack = (e) => {
+      const stream = e.streams[0] ?? new MediaStream([e.track]);
+      this.audio.attach(id, stream);
+      this.remoteStreamCb?.(id, stream);
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState !== "failed" || this.peers.get(id) !== peer) return;
+      // Retry from the offering side only, so both ends don't race.
+      this.removePeer(id);
+      if (this.room.sessionId < id && peer.retries < MAX_RETRIES) {
+        setTimeout(() => {
+          if (this.active && !this.peers.has(id)) void this.connect(id, peer.retries + 1);
+        }, RETRY_DELAY_MS);
+      }
+    };
+    return peer;
+  }
+
+  /** Offering side. */
+  private async connect(id: string, retries = 0): Promise<void> {
+    const { pc } = this.createPeer(id, retries);
+    // One audio channel in each direction. Without a mic we still receive.
+    const transceiver = pc.addTransceiver("audio", { direction: "sendrecv" });
+    await transceiver.sender.replaceTrack(this.localTrack);
+    await pc.setLocalDescription(await pc.createOffer());
+    await waitForIceGathering(pc);
+    this.sendSignal(id, pc.localDescription);
+  }
+
+  private async handleSignal({ from, data }: VoiceSignalRelay): Promise<void> {
+    if (!this.active) return;
+    try {
+      if (data.type === "offer") {
+        // A fresh offer replaces any previous connection with this player (e.g. a retry).
+        if (this.peers.has(from)) this.removePeer(from);
+        const { pc } = this.createPeer(from);
+        await pc.setRemoteDescription(data);
+        const transceiver = pc.getTransceivers()[0];
+        if (transceiver) {
+          transceiver.direction = "sendrecv";
+          await transceiver.sender.replaceTrack(this.localTrack);
+        }
+        await pc.setLocalDescription(await pc.createAnswer());
+        await waitForIceGathering(pc);
+        this.sendSignal(from, pc.localDescription);
+      } else {
+        const pc = this.peers.get(from)?.pc;
+        if (pc?.signalingState === "have-local-offer") await pc.setRemoteDescription(data);
+      }
+    } catch (err) {
+      console.warn(`[voice] signalling with ${from} failed`, err);
+    }
+  }
+
+  private sendSignal(to: string, desc: RTCSessionDescription | null): void {
+    if (!desc || (desc.type !== "offer" && desc.type !== "answer")) return;
+    const data: VoiceSignalData = { type: desc.type, sdp: desc.sdp };
+    const message: VoiceSignalMessage = { to, data };
+    this.room.send(Msg.voiceSignal, message);
+  }
+}
+
+function waitForIceGathering(pc: RTCPeerConnection): Promise<void> {
+  if (pc.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      pc.removeEventListener("icegatheringstatechange", check);
+      clearTimeout(timer);
+      resolve();
+    };
+    const check = () => {
+      if (pc.iceGatheringState === "complete") done();
+    };
+    const timer = setTimeout(done, ICE_GATHER_TIMEOUT_MS);
+    pc.addEventListener("icegatheringstatechange", check);
+  });
+}

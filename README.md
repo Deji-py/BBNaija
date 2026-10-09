@@ -12,7 +12,8 @@ The full build specification lives in [SPEC.md](SPEC.md).
 | M0 — Project setup | ✅ done |
 | M1 — Solo house & character | ✅ done |
 | M2 — Multiplayer sync | ✅ done |
-| M3 — Proximity voice | ⏳ next |
+| M3 — Proximity voice | ✅ done |
+| M4 — Chat, emotes & interactions | ⏳ next |
 
 ## Requirements
 
@@ -37,7 +38,7 @@ This starts both apps in parallel:
 | App | URL |
 |---|---|
 | Client (Vite) | http://localhost:5173 |
-| Game server (Colyseus) | ws://localhost:2567 — health check at http://localhost:2567/health |
+| Game server (Colyseus) | port 2567 — the client reaches it through Vite at `/colyseus`; health check at http://localhost:2567/health |
 
 Open http://localhost:5173, pick a name and colour, and enter the house. Open a second browser window to see two housemates together.
 
@@ -48,7 +49,30 @@ pnpm bots       # 2 bots join the house and wander around (Ctrl+C to stop)
 pnpm bots 5     # any number up to the 8-housemate limit
 ```
 
-**Another machine on the same Wi-Fi:** `pnpm dev` prints a `Network:` URL (e.g. `http://192.168.1.20:5173`). Open it on the other machine — the client connects to the game server on the same host, port 2567. If it can't connect, allow incoming connections for `node` in macOS System Settings → Network → Firewall.
+**Another machine on the same Wi-Fi:** `pnpm dev` prints a `Network:` URL (e.g. `http://192.168.1.20:5173`). Open it on the other machine. If it can't connect, allow incoming connections for `node` in macOS System Settings → Network → Firewall. Over plain `http://` the other machine can move and **listen**, but browsers won't give it a microphone — use a tunnel (below) to talk.
+
+### Voice
+
+Proximity voice: housemates hear each other louder the closer they are (full volume within 1.5 m, silent beyond 15 m), panned left/right relative to your camera. Walls don't block sound yet.
+
+| Input | Action |
+|---|---|
+| M or the **Mute** button | Mute / unmute |
+| **Open mic / Push-to-talk** button | Switch mode |
+| Hold V | Talk (push-to-talk mode) |
+
+The browser asks for microphone access when you click **Enter the house**. If you decline (or have no mic), you can still listen. A green badge above a head means that person is talking; red means muted.
+
+**Testing voice across machines (HTTPS tunnel).** Browsers only allow the microphone on `https://` or `http://localhost`. A free Cloudflare quick tunnel gives your dev server an HTTPS URL that works anywhere:
+
+```bash
+brew install cloudflared                       # once
+cloudflared tunnel --url http://localhost:5173  # while pnpm dev is running
+```
+
+It prints a `https://<random>.trycloudflare.com` URL — open that on every machine (including your own). The game server traffic goes through the same URL (Vite proxies `/colyseus` to port 2567), so nothing else needs exposing. Anyone with the URL can join, so only share it with testers. `ngrok http 5173` works too.
+
+**Testing voice on one machine:** open `http://localhost:5173/?fakeMic` in two windows. In development, `?fakeMic` sends a 440 Hz test tone instead of your microphone, so you can hear the distance falloff without feedback. Use headphones.
 
 ### Controls
 
@@ -75,7 +99,7 @@ apps/server      Node + TypeScript + Colyseus authoritative game server
 packages/shared  Types and constants shared by client and server (@bbn/shared)
 ```
 
-Inside `apps/client/src`: `scene/` (renderer, house builder, follow camera), `entities/` (avatar, name tags), `net/` (connection, prediction, interpolation), `input/`, `ui/` (lobby, HUD), `modes/` (the game loop per mode).
+Inside `apps/client/src`: `scene/` (renderer, house builder, follow camera), `entities/` (avatar, name tags, voice badges), `net/` (connection, prediction, interpolation), `voice/` (VoiceProvider interface, WebRTC mesh, spatial audio, mic), `input/`, `ui/` (lobby, HUD, voice controls), `modes/` (the game loop per mode).
 
 Inside `apps/server/src`: `rooms/HouseRoom.ts` (the authoritative room), `schema/` (synced state). `apps/server/scripts/bot.ts` is the bot used by `pnpm bots`.
 
@@ -86,6 +110,13 @@ Inside `apps/server/src`: `rooms/HouseRoom.ts` (the authoritative room), `schema
 - **Client-side prediction** for your own avatar: it moves the instant you press a key; when the server's position arrives, the client re-applies any inputs the server hasn't processed yet. Same code on both sides → corrections are normally zero.
 - **Interpolation** for everyone else: remote avatars are drawn 100 ms in the past, blending between the two server snapshots around that time.
 
+### How voice works
+
+- **Peer-to-peer mesh (WebRTC).** Each housemate's browser holds a direct audio connection to every other housemate; audio never touches our server. The server only relays the one-off connection setup (an *offer* and an *answer*, via `voice:signal`). Fine up to ~8 people; M9 swaps in LiveKit behind the same `VoiceProvider` interface.
+- **Spatial audio.** Each incoming voice runs through a Web Audio `PannerNode` placed at that housemate's head; the listener sits at your head facing the camera direction.
+- **Mute / push-to-talk** just disable the outgoing mic track, so they take effect in ~0.1 s with no reconnection.
+- A public STUN server (Google's) helps peers on different networks find each other. Some strict networks (corporate, some mobile carriers) also need a TURN relay — planned for M9.
+
 The house layout (`packages/shared/src/house.ts`) and the collision/movement code (`packages/shared/src/movement.ts`) live in the shared package so the server can run the exact same rules once it becomes authoritative in M2.
 
 `@bbn/shared` is consumed as TypeScript source directly — Vite (client) and tsx (server) compile it on the fly, so there is no build step during development.
@@ -94,5 +125,5 @@ The house layout (`packages/shared/src/house.ts`) and the collision/movement cod
 
 | Variable | Where | Default | Purpose |
 |---|---|---|---|
-| `GAME_SERVER_PORT` | server | `2567` | Port the game server listens on |
-| `VITE_SERVER_URL` | client | `http://<page host>:2567` | Override the game server URL |
+| `GAME_SERVER_PORT` | server, Vite proxy | `2567` | Port the game server listens on |
+| `VITE_SERVER_URL` | client | `<page origin>/colyseus` | Override the game server URL |

@@ -16,6 +16,9 @@ export const Player = schema(
     anim: t.string(),
     area: t.string(),
     lastSeq: t.uint32(),
+    voice: t.boolean(),
+    speaking: t.boolean(),
+    muted: t.boolean(),
   },
   "Player",
 );

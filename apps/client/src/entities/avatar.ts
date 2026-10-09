@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { mat } from "../scene/materials.js";
 import { createNameTag } from "./nameTag.js";
+import { VoiceIcon, type VoiceIconState } from "./voiceIcon.js";
 
 const SKIN = 0xe0ac69;
 const DARK = 0x2a2a35;
@@ -20,6 +21,8 @@ export class Avatar {
   private readonly rightArm: THREE.Group;
   private readonly leftLeg: THREE.Group;
   private readonly rightLeg: THREE.Group;
+
+  private readonly voiceIcon = new VoiceIcon();
 
   private walkPhase = 0;
   /** 0 = standing still, 1 = full walk cycle. Smoothed so starts/stops ease in. */
@@ -58,18 +61,25 @@ export class Avatar {
     const tag = createNameTag(name);
     tag.position.y = 2.15;
     this.root.add(tag);
+    this.voiceIcon.sprite.position.y = 2.5;
+    this.root.add(this.voiceIcon.sprite);
 
     this.root.traverse((o) => {
       if (o instanceof THREE.Mesh) o.castShadow = true;
     });
   }
 
+  setVoiceState(state: VoiceIconState): void {
+    this.voiceIcon.set(state);
+  }
+
   /** Frees GPU resources. Materials are shared (see scene/materials.ts) and are kept. */
   dispose(): void {
+    this.voiceIcon.dispose();
     this.root.removeFromParent();
     this.root.traverse((o) => {
       if (o instanceof THREE.Mesh) o.geometry.dispose();
-      if (o instanceof THREE.Sprite) {
+      if (o instanceof THREE.Sprite && o !== this.voiceIcon.sprite) {
         o.material.map?.dispose();
         o.material.dispose();
       }
@@ -82,6 +92,7 @@ export class Avatar {
    */
   update(dt: number, speed: number): void {
     this.time += dt;
+    this.voiceIcon.update(dt);
     const target = Math.min(speed / 4, 1);
     this.walkAmount += (target - this.walkAmount) * Math.min(dt * 10, 1);
     this.walkPhase += dt * speed * 2.4;

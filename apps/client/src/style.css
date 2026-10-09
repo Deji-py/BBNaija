@@ -38,19 +38,17 @@ canvas:active {
 .hud-help {
   position: absolute;
   bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 16px;
+  max-width: calc(100% - 300px);
   padding: 6px 14px;
   border-radius: 8px;
   background: rgb(15 15 25 / 0.45);
   font-size: 13px;
-  white-space: nowrap;
 }
 @media (max-width: 600px) {
   .hud-help {
     white-space: normal;
-    width: calc(100% - 64px);
-    text-align: center;
+    max-width: calc(100% - 32px);
   }
 }
 
@@ -177,4 +175,51 @@ canvas:active {
   margin: 12px 0 0;
   color: #ff7b7b;
   font-size: 14px;
+}
+
+/* --- Voice controls --- */
+.voice-controls {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  z-index: 5;
+}
+.voice-status {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgb(15 15 25 / 0.55);
+  font-size: 13px;
+}
+.voice-controls.live .voice-status {
+  background: #2fbf71;
+}
+.voice-controls.no-mic .voice-status {
+  max-width: 260px;
+  border-radius: 8px;
+  background: rgb(160 60 60 / 0.8);
+}
+.voice-buttons {
+  display: flex;
+  gap: 6px;
+}
+.voice-buttons button {
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: rgb(15 15 25 / 0.7);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+.voice-buttons button.active {
+  background: #d64545;
+}
+@media (max-width: 600px) {
+  .hud-help {
+    bottom: 96px;
+  }
 }

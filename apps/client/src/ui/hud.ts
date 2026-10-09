@@ -16,7 +16,7 @@ export class Hud {
         <div class="hud-pill hud-count"></div>
       </div>
       <div class="hud-fps"></div>
-      <div class="hud-help">WASD / arrows to move · drag to look · Q / E to turn · scroll to zoom</div>
+      <div class="hud-help">WASD / arrows move · drag to look · Q / E turn · scroll zoom · V push-to-talk · M mute</div>
     `;
     parent.appendChild(el);
     this.areaEl = el.querySelector(".hud-area")!;

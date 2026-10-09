@@ -23,6 +23,8 @@ export const AVATAR_COLORS = [
 export interface JoinOptions {
   name: string;
   color: string;
+  /** True for real browser clients that take part in voice chat (bots leave it off). */
+  voice?: boolean;
 }
 
 /**
@@ -37,10 +39,44 @@ export interface InputMessage {
   dz: number;
 }
 
-/** Message type names, client → server. */
+/** Message type names. `voice:signal` goes both ways (relayed by the server). */
 export const Msg = {
   input: "input",
+  voiceSignal: "voice:signal",
+  voiceState: "voice:state",
 } as const;
+
+/** WebRTC session description exchanged when two housemates set up a voice link. */
+export interface VoiceSignalData {
+  type: "offer" | "answer";
+  sdp: string;
+}
+
+/** Client → server: please forward this to player `to`. */
+export interface VoiceSignalMessage {
+  to: string;
+  data: VoiceSignalData;
+}
+
+/** Server → client: a signal forwarded from player `from`. */
+export interface VoiceSignalRelay {
+  from: string;
+  data: VoiceSignalData;
+}
+
+/** Client → server: my current voice status, shown to everyone as an icon. */
+export interface VoiceStateMessage {
+  speaking: boolean;
+  muted: boolean;
+}
+
+/** Longest SDP the server will relay. Real audio-only SDPs are a few KB. */
+export const MAX_SDP_LENGTH = 20_000;
+
+/** Within this distance (m) a voice plays at full volume. */
+export const VOICE_REF_DISTANCE = 1.5;
+/** Beyond this distance (m) a voice is silent. */
+export const VOICE_MAX_DISTANCE = 15;
 
 /** Duration of one input step in seconds. */
 export const INPUT_STEP_SEC = 1 / TICK_RATE_HZ;
@@ -75,6 +111,10 @@ export interface PlayerView {
   area: string;
   /** Last input `seq` the server applied for this player. */
   lastSeq: number;
+  /** Takes part in voice chat (browser client, not a bot). */
+  voice: boolean;
+  speaking: boolean;
+  muted: boolean;
 }
 
 export interface HouseStateView {
