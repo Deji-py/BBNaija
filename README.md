@@ -15,7 +15,8 @@ The full build specification lives in [SPEC.md](SPEC.md).
 | M3 — Proximity voice | ✅ done |
 | M4 — Chat, emotes & interactions | ✅ done |
 | M5 — Spectator mode | ✅ done |
-| M6 — Big Brother console, tasks & Diary Room | ⏳ next |
+| M6 — Big Brother console, tasks & Diary Room | ✅ done |
+| M7 — Accounts, seasons & applications | ⏳ next |
 
 ## Requirements
 
@@ -60,7 +61,43 @@ Open **http://localhost:5173/watch** and click **Start watching**. Viewers have 
 - **The bubble stays intact:** viewer chat, reactions and the viewer list are only ever sent to viewers. Viewers *can* read house chat, as on the real show.
 - Housemates and viewers share one room: up to 8 housemates plus 100 viewers.
 
+### Big Brother console
 
+Open **http://localhost:5173/bigbrother** and enter the admin secret. Set it in `apps/server/.env` (copy `apps/server/.env.example`):
+
+```bash
+cp apps/server/.env.example apps/server/.env
+```
+
+Then edit `ADMIN_SECRET` in that file. Without a `.env`, development uses the secret **`bigbrother`** (the server logs a warning); production refuses to start without `ADMIN_SECRET`. One console at a time — opening it again takes over.
+
+| Control | What it does |
+|---|---|
+| Hold **T** / “Diary Room” button | Talk to the housemate in the Diary Room only |
+| Hold **B** / “whole house” button | Talk to every housemate (they see “Big Brother is speaking”) |
+| Announcement | Red banner for housemates *and* viewers, also posted in house chat |
+| **Diary** (per housemate) | Teleports them into the Diary Room chair and starts a private session |
+| End session / Broadcast to viewers | Release them; choose whether viewers can watch & hear (default: broadcast) |
+| **Mute** / **Kick** | Mute blocks their voice and house chat; kick removes them from the house |
+| Tasks | Start a task with a reward; the top scorer(s) win it |
+| Event log | Everything that happened (in memory until M7 adds the database) |
+| 1–6, 0, click a name | Cameras, free cam, follow — as on /watch |
+
+Talking stops automatically if the console window loses focus, so you can't stay on air by accident.
+
+**Diary Room privacy.** Voice is peer-to-peer, so each client enforces the same rule (`packages/shared/src/voicePolicy.ts`) in both directions: it doesn't send its mic to anyone who mustn't hear it, and doesn't play anyone it mustn't hear. During a session the housemate is heard only by Big Brother (and viewers, if broadcast) and can't hear the house; they stay in the chair until released, and their house chat and emotes are paused. New voice links start silent until these rules allow them.
+
+**Tasks**
+
+| Task | How to play | Ends |
+|---|---|---|
+| Cooking challenge | Fridge (E) → counter (E) → cook at the stove for 4 s = 1 dish | after 3 min |
+| Treasure hunt | 6 glowing gems hidden around the house — walk up, press E | 3 min, or when all are found |
+| Quiz | 5 multiple-choice questions, 15 s each; first answer is final | after question 5 |
+
+Rewards: 🛡️ Immunity, ⭐ Extra nomination power (both used in M8), 👑 Golden crown (worn on the avatar). Ties share the reward.
+
+### Testing multiplayer
 
 ```bash
 pnpm bots       # 2 bots join the house and wander around (Ctrl+C to stop)
@@ -99,6 +136,7 @@ It prints a `https://<random>.trycloudflare.com` URL — open that on every mach
 | W A S D / arrow keys | Move (relative to the camera) |
 | Drag with the mouse | Orbit / tilt the camera |
 | Z / C | Turn the camera left / right |
+| V / M | Push-to-talk / mute |
 | Mouse wheel | Zoom |
 | E | Use the object you're next to (a prompt appears) — or get up again |
 | 1 / 2 | Wave / dance (2 again, or moving, stops dancing) |
@@ -124,9 +162,9 @@ apps/server      Node + TypeScript + Colyseus authoritative game server
 packages/shared  Types and constants shared by client and server (@bbn/shared)
 ```
 
-Inside `apps/client/src`: `scene/` (renderer, house builder, follow & spectator cameras), `entities/` (avatar, name tags, voice badges), `net/` (connection, prediction, interpolation), `voice/` (VoiceProvider interface, WebRTC mesh, spatial audio, mic), `input/`, `ui/` (lobby, HUD, voice controls), `modes/` (`housemate.ts`, `spectator.ts`, and `playersView.ts` which draws everyone from server state for both).
+Inside `apps/client/src`: `scene/` (renderer, house builder, follow & spectator cameras), `entities/` (avatar, name tags, voice badges), `net/` (connection, prediction, interpolation), `voice/` (VoiceProvider interface, WebRTC mesh, spatial audio, mic), `input/`, `ui/` (lobby, HUD, voice controls), `modes/` (`housemate.ts`, `spectator.ts`, `admin.ts`, and `playersView.ts` which draws everyone from server state for all three).
 
-Inside `apps/server/src`: `rooms/HouseRoom.ts` (the authoritative room), `schema/` (synced state), `systems/` (chat log, rate limiting).
+Inside `apps/server/src`: `rooms/HouseRoom.ts` (the authoritative room), `schema/` (synced state), `systems/` (chat log, rate limiting, tasks, event log), `config.ts` (admin secret).
 
 Interactable objects (seats, exit spots, ranges) are defined in `packages/shared/src/interactions.ts`, next to the house layout. `apps/server/scripts/bot.ts` is the bot used by `pnpm bots`.
 
@@ -153,4 +191,5 @@ The house layout (`packages/shared/src/house.ts`) and the collision/movement cod
 | Variable | Where | Default | Purpose |
 |---|---|---|---|
 | `GAME_SERVER_PORT` | server, Vite proxy | `2567` | Port the game server listens on |
+| `ADMIN_SECRET` | server (`apps/server/.env`) | `bigbrother` in development only | Secret for the Big Brother console |
 | `VITE_SERVER_URL` | client | `<page origin>/colyseus` | Override the game server URL |

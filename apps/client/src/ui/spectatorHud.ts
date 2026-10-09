@@ -41,6 +41,8 @@ export class SpectatorHud {
       onCamera: (mode: CameraMode) => void;
       onReact: (emoji: Reaction) => void;
     },
+    /** The Big Brother console hides the viewer-only parts (it has its own housemate list). */
+    options: { housemates?: boolean; reactions?: boolean } = {},
   ) {
     const el = document.createElement("div");
     el.className = "spectator-hud";
@@ -68,6 +70,8 @@ export class SpectatorHud {
     this.audioEl = el.querySelector(".spec-audio")!;
     this.floatLayer = el.querySelector(".spec-floats")!;
     this.rightColumn = el.querySelector(".spec-right")!;
+    if (options.housemates === false) el.querySelector<HTMLElement>(".spec-housemates")!.hidden = true;
+    if (options.reactions === false) el.querySelector<HTMLElement>(".spec-react")!.hidden = true;
 
     const cams = el.querySelector(".spec-cams")!;
     HOUSE_CAMERAS.forEach((cam, i) => {

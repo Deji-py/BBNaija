@@ -1,14 +1,30 @@
 import { startHousemateMode } from "./modes/housemate.js";
 import { startSpectatorMode } from "./modes/spectator.js";
+import { startAdminMode } from "./modes/admin.js";
 import { joinHouse } from "./net/connection.js";
-import { showLobby, showWatchStart } from "./ui/lobby.js";
+import { showAdminLogin, showLobby, showWatchStart } from "./ui/lobby.js";
 import { requestMic } from "./voice/mic.js";
 import { AVATAR_COLORS } from "@bbn/shared";
 import "./style.css";
 
 const app = document.querySelector<HTMLElement>("#app")!;
+const path = location.pathname.replace(/\/+$/, "");
 
-if (location.pathname.replace(/\/+$/, "") === "/watch") {
+if (path === "/bigbrother") {
+  // Big Brother console: needs the admin secret; the mic is for the Diary Room and announcements.
+  showAdminLogin(app, async (adminSecret) => {
+    const audioCtx = new AudioContext();
+    const mic = await requestMic(audioCtx);
+    try {
+      const room = await joinHouse({ name: "Big Brother", color: "#e0243b", role: "admin", adminSecret, voice: true });
+      startAdminMode(app, room, audioCtx, mic);
+    } catch (err) {
+      mic.stream?.getTracks().forEach((t) => t.stop());
+      void audioCtx.close();
+      throw err;
+    }
+  });
+} else if (path === "/watch") {
   // Spectators: no avatar, no mic.
   showWatchStart(app, async (name) => {
     // Created inside the click handler: browsers only let audio start after a user gesture.

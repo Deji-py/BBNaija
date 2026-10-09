@@ -1,14 +1,22 @@
 import * as THREE from "three";
 import {
+  COOK_STAGE,
+  CloseCode,
+  GEM_PICKUP_RANGE,
   Msg,
   activityExit,
   areaAt,
   nearestInteractable,
   type ActionMessage,
+  type AnnouncementMessage,
   type ChatMessage,
   type ChatSendMessage,
+  type DiaryChatMessage,
   type EmoteMessage,
+  type HouseStateView,
+  type Interactable,
   type PlayerView,
+  type QuizAnswerMessage,
   type VoiceStateMessage,
 } from "@bbn/shared";
 import { setupScene } from "../scene/setupScene.js";
@@ -28,6 +36,10 @@ import { MeshVoiceProvider } from "../voice/meshVoice.js";
 import { SpatialAudio } from "../voice/spatialAudio.js";
 import { SpeakingDetector, type MicResult } from "../voice/mic.js";
 import { VoiceControls } from "../ui/voiceControls.js";
+import { applyVoiceRouting } from "../voice/voiceRouting.js";
+import { Banners } from "../ui/banner.js";
+import { TaskPanel } from "../ui/taskPanel.js";
+import { GemsView } from "../scene/gems.js";
 
 const TURN_SPEED = 2.2; // rad/s for Z/C camera turning
 const FACE_TURN_RATE = 14; // how fast the avatar rotates to face its movement direction
@@ -78,13 +90,41 @@ export function startHousemateMode(container: HTMLElement, room: HouseRoom, audi
     const transmitting = voiceControls.isTransmitting();
     const state: VoiceStateMessage = {
       speaking: transmitting && (speaking?.isSpeaking() ?? false),
-      muted: !mic.stream || voiceControls.muted,
+      muted: !mic.stream || voiceControls.muted || !!local?.state.adminMuted,
     };
     if (state.speaking !== sentVoiceState?.speaking || state.muted !== sentVoiceState.muted) {
       room.send(Msg.voiceState, state);
       sentVoiceState = state;
     }
+    // Who hears whom (Diary Room privacy, Big Brother's mute). Also runs every frame;
+    // the timer keeps it right while this tab is in the background.
+    applyVoiceRouting(voice, room.sessionId, room.state as HouseStateView);
   }, 100);
+
+  // --- Big Brother: announcements, tasks, Diary Room ---
+  const banners = new Banners(container);
+  const taskPanel = new TaskPanel(container, {
+    myId: room.sessionId,
+    onAnswer: (answer) => {
+      const message: QuizAnswerMessage = { answer };
+      room.send(Msg.quizAnswer, message);
+    },
+  });
+  const gems = new GemsView(scene);
+  room.onMessage(Msg.announcement, ({ text, to }: AnnouncementMessage) => {
+    if (to === "all" || to === room.sessionId) banners.announce(text);
+  });
+  const diaryChat = new ChatPanel(
+    container,
+    (text) => {
+      const message: DiaryChatMessage = { text };
+      room.send(Msg.diaryChat, message);
+    },
+    { className: "diary-chat", label: "Diary Room", placeholder: "Talk to Big Brother (Enter)" },
+  );
+  diaryChat.setVisible(false);
+  room.onMessage(Msg.diaryChat, (msg: ChatMessage) => diaryChat.add(msg));
+  let wasInDiary = false;
 
   // --- chat ---
   const chat = new ChatPanel(container, (text) => {
@@ -118,7 +158,14 @@ export function startHousemateMode(container: HTMLElement, room: HouseRoom, audi
     renderer.setAnimationLoop(null);
     clearInterval(voiceStateTimer);
     voice.leave();
-    showDisconnected(container, code === 1000 ? "You left the house." : `Lost connection to the house (code ${code}).`);
+    showDisconnected(
+      container,
+      code === CloseCode.kicked
+        ? "Big Brother has removed you from the house."
+        : code === 1000
+          ? "You left the house."
+          : `Lost connection to the house (code ${code}).`,
+    );
   });
 
   // --- interaction & emote keys ---
@@ -136,25 +183,70 @@ export function startHousemateMode(container: HTMLElement, room: HouseRoom, audi
     }
   });
 
-  /** Works out the "Press E" prompt from where we are and who's using what. */
-  function updatePrompt(me: PlayerView, x: number, z: number): void {
+  /** Works out the "Press E" prompt from where we are, the current task and who's using what. */
+  function updatePrompt(me: PlayerView, x: number, z: number, inDiary: boolean): void {
+    eTarget = null;
+    if (inDiary) return hud.setPrompt(null);
     if (me.activity) {
       eTarget = me.activity;
       hud.setPrompt(me.activity === "pool" ? "Get out of the pool" : "Get up");
       return;
     }
-    const it = nearestInteractable(x, z);
-    eTarget = null;
+    const task = room.state.task?.status === "running" ? room.state.task : undefined;
+
+    // Treasure hunt: a gem in reach beats any furniture.
+    if (task?.type === "treasure") {
+      const gem = [...task.gems].find((g) => !g.found && Math.hypot(g.x - x, g.z - z) <= GEM_PICKUP_RANGE);
+      if (gem) {
+        eTarget = `gem:${gem.id}`;
+        return hud.setPrompt("Pick up the hidden gem 💎");
+      }
+    }
+
+    // Fridge and counter only matter during the cooking challenge, at the right step.
+    const usable = (it: Interactable) =>
+      it.kind !== "task" ||
+      (task?.type === "cooking" &&
+        ((it.id === "fridge" && me.cookStage === COOK_STAGE.start) ||
+          (it.id === "counter" && me.cookStage === COOK_STAGE.hasIngredients)));
+    const it = nearestInteractable(x, z, usable);
     if (!it) return hud.setPrompt(null);
     if (it.kind === "toggle") {
       eTarget = it.id;
       return hud.setPrompt(room.state.tvOn ? it.promptOff : it.prompt);
+    }
+    if (it.kind === "task") {
+      eTarget = it.id;
+      return hud.setPrompt(it.prompt);
     }
     const users = [...room.state.players.values()].filter((p) => p.activity === it.id).length;
     const capacity = it.kind === "slots" ? it.slots.length : it.capacity;
     if (users >= capacity) return hud.setPrompt(it.kind === "pool" ? "The pool is full" : "Someone's using that", false);
     eTarget = it.id;
     hud.setPrompt(it.prompt);
+  }
+
+  /** Diary Room session, Big Brother's mute and voice: banners, chat and mic follow the server's state. */
+  function updateBigBrotherState(me: PlayerView, inDiary: boolean): void {
+    const state = room.state as HouseStateView;
+    if (inDiary !== wasInDiary) {
+      wasInDiary = inDiary;
+      diaryChat.setVisible(inDiary);
+      if (inDiary) diaryChat.clear();
+    }
+    banners.setStatus(
+      "diary",
+      inDiary ? "🎙️ You're in the Diary Room. Only Big Brother can hear you — the house can't." : null,
+      "live",
+    );
+    banners.setStatus("muted", me.adminMuted ? "🔇 Big Brother has muted you." : null, "warn");
+    banners.setStatus("bb", state.bigBrotherSpeaking ? "🔊 Big Brother is speaking" : null, "live");
+    voiceControls.setForcedMute(me.adminMuted ? "Muted by Big Brother" : null);
+    chat.setEnabled(
+      !me.adminMuted && !inDiary,
+      me.adminMuted ? "Big Brother has muted you" : "House chat is paused while you're in the Diary Room",
+    );
+    diaryChat.setEnabled(inDiary);
   }
 
   // Dev-only handle for poking at the scene from the browser console.
@@ -171,14 +263,16 @@ export function startHousemateMode(container: HTMLElement, room: HouseRoom, audi
       if (keyboard.isDown("KeyZ")) followCam.rotate(TURN_SPEED * dt);
       if (keyboard.isDown("KeyC")) followCam.rotate(-TURN_SPEED * dt);
 
-      const { forward, right } = keyboard.moveAxes();
+      const me = local.state;
+      const inDiary = (room.state as HouseStateView).diaryHousemate === room.sessionId;
+      // In the Diary Room you stay in the chair until Big Brother lets you go.
+      const { forward, right } = inDiary ? { forward: 0, right: 0 } : keyboard.moveAxes();
       const yaw = followCam.yaw;
       // "Forward" points from the camera toward the player, flattened onto the ground.
       move.set(-Math.sin(yaw) * forward + Math.cos(yaw) * right, -Math.cos(yaw) * forward - Math.sin(yaw) * right);
       if (move.lengthSq() > 1) move.normalize(); // diagonal shouldn't be faster
       const moving = move.lengthSq() > 0;
 
-      const me = local.state;
       const pos = local.avatar.root.position;
       const next = local.controller.update(dt, move.x, move.y);
       const speed = dt > 0 ? Math.hypot(next.x - pos.x, next.z - pos.z) / dt : 0;
@@ -196,14 +290,19 @@ export function startHousemateMode(container: HTMLElement, room: HouseRoom, audi
 
       // Our ears follow the avatar, facing where the camera looks.
       voice.setListenerPosition({ x: pos.x, y: HEAD_HEIGHT, z: pos.z }, followCam.yaw);
-      if (sentVoiceState) local.avatar.setVoiceState(voiceIconFor(sentVoiceState));
+      if (sentVoiceState) local.avatar.setVoiceState(voiceIconFor({ ...sentVoiceState, adminMuted: me.adminMuted }));
+      local.avatar.setPerks(me.perks ? [...me.perks] : []);
 
       followCam.update(dt, pos);
       hud.setArea(areaAt(pos.x, pos.z)?.label ?? "Outside");
-      updatePrompt(me, pos.x, pos.z);
+      updatePrompt(me, pos.x, pos.z, inDiary);
+      updateBigBrotherState(me, inDiary);
     }
 
     players.update(dt);
+    applyVoiceRouting(voice, room.sessionId, room.state as HouseStateView);
+    taskPanel.update(room.state as HouseStateView);
+    gems.update(dt, (room.state as HouseStateView).task);
 
     house.tv.animate(dt);
     hud.tick(dt);

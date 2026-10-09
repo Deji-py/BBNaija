@@ -1,11 +1,17 @@
 import { VOICE_MAX_DISTANCE, VOICE_REF_DISTANCE } from "@bbn/shared";
 import type { Vec3 } from "./VoiceProvider.js";
 
+/** How a voice is played: in 3D at its position, flat at full volume (Big Brother), or not at all. */
+export type SourceMode = "spatial" | "direct" | "muted";
+
 interface Source {
   element: HTMLAudioElement;
   node: MediaStreamAudioSourceNode;
   panner: PannerNode;
+  spatialGain: GainNode;
+  directGain: GainNode;
   analyser: AnalyserNode;
+  mode: SourceMode;
 }
 
 /**
@@ -43,14 +49,34 @@ export class SpatialAudio {
       rolloffFactor: 1,
     });
     const analyser = new AnalyserNode(this.ctx, { fftSize: 512 });
-    node.connect(panner).connect(analyser).connect(this.ctx.destination);
-    this.sources.set(id, { element, node, panner, analyser });
+    // Two paths into the same output; setMode() opens one (or neither).
+    // Starts silent: nothing plays until the voice rules say we may hear this peer.
+    const spatialGain = new GainNode(this.ctx, { gain: 0 });
+    const directGain = new GainNode(this.ctx, { gain: 0 });
+    node.connect(spatialGain).connect(panner).connect(analyser);
+    node.connect(directGain).connect(analyser);
+    analyser.connect(this.ctx.destination);
+    this.sources.set(id, { element, node, panner, spatialGain, directGain, analyser, mode: "muted" });
+  }
+
+  setMode(id: string, mode: SourceMode): void {
+    const s = this.sources.get(id);
+    if (!s || s.mode === mode) return;
+    s.mode = mode;
+    s.spatialGain.gain.value = mode === "spatial" ? 1 : 0;
+    s.directGain.gain.value = mode === "direct" ? 1 : 0;
+  }
+
+  has(id: string): boolean {
+    return this.sources.has(id);
   }
 
   detach(id: string): void {
     const s = this.sources.get(id);
     if (!s) return;
     s.node.disconnect();
+    s.spatialGain.disconnect();
+    s.directGain.disconnect();
     s.panner.disconnect();
     s.analyser.disconnect();
     s.element.srcObject = null;

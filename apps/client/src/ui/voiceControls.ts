@@ -21,6 +21,8 @@ export class VoiceControls {
   muted: boolean;
   private pttHeld = false;
   private transmitting = false;
+  /** Set when Big Brother has muted us (overrides everything; we can't unmute ourselves). */
+  private forcedMute: string | null = null;
   private changeCb: ((transmitting: boolean) => void) | null = null;
   private readonly el: HTMLElement;
   private readonly muteBtn: HTMLButtonElement;
@@ -80,6 +82,12 @@ export class VoiceControls {
     return this.transmitting;
   }
 
+  setForcedMute(reason: string | null): void {
+    if (reason === this.forcedMute) return;
+    this.forcedMute = reason;
+    this.update();
+  }
+
   private setPtt(held: boolean): void {
     if (held === this.pttHeld) return;
     this.pttHeld = held;
@@ -99,14 +107,17 @@ export class VoiceControls {
   }
 
   private update(): void {
-    const transmitting = this.hasMic && !this.muted && (this.mode === "open" || this.pttHeld);
+    const transmitting = this.hasMic && !this.muted && !this.forcedMute && (this.mode === "open" || this.pttHeld);
     if (transmitting !== this.transmitting) {
       this.transmitting = transmitting;
       this.changeCb?.(transmitting);
     }
     if (!this.hasMic) return;
     this.el.classList.toggle("live", transmitting);
-    this.statusEl.textContent = this.muted
+    this.el.classList.toggle("forced", !!this.forcedMute);
+    this.statusEl.textContent = this.forcedMute
+      ? this.forcedMute
+      : this.muted
       ? "Muted · M to unmute"
       : this.mode === "ptt"
         ? transmitting

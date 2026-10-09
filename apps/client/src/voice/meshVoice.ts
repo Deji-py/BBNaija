@@ -41,6 +41,8 @@ export class MeshVoiceProvider implements VoiceProvider {
   private remoteStreamCb: ((id: string, stream: MediaStream) => void) | null = null;
   private muted = true;
   private active = false;
+  /** Which peers currently get our mic (see setSendAllowed). Unknown = not yet allowed. */
+  private readonly sendTo = new Map<string, boolean>();
 
   constructor(
     private readonly room: HouseRoom,
@@ -94,7 +96,35 @@ export class MeshVoiceProvider implements VoiceProvider {
   removePeer(id: string): void {
     this.peers.get(id)?.pc.close();
     this.peers.delete(id);
+    this.sendTo.delete(id);
     this.audio.detach(id);
+  }
+
+  /**
+   * Whether peer `id` should receive our mic at all (e.g. not while one of us is
+   * in the Diary Room). New links send nothing until this says yes. Swaps the track on that one connection — instant, no
+   * renegotiation. Cheap to call every frame: only acts when the answer changes.
+   */
+  setSendAllowed(id: string, allowed: boolean): void {
+    if (this.sendTo.get(id) === allowed) return;
+    this.sendTo.set(id, allowed);
+    void this.applySendTrack(id);
+  }
+
+  /** Ids of everyone we have a connection with. */
+  peerIds(): string[] {
+    return [...this.peers.keys()];
+  }
+
+  get spatial(): SpatialAudio {
+    return this.audio;
+  }
+
+  private async applySendTrack(id: string): Promise<void> {
+    const sender = this.peers.get(id)?.pc.getTransceivers()[0]?.sender;
+    if (!sender) return;
+    const track = this.sendTo.get(id) === true ? this.localTrack : null;
+    if (sender.track !== track) await sender.replaceTrack(track).catch(() => {});
   }
 
   /** Dev tooling: connection state per peer. */
@@ -131,7 +161,7 @@ export class MeshVoiceProvider implements VoiceProvider {
     const { pc } = this.createPeer(id, retries);
     // One audio channel in each direction; without a mic (or as a viewer) receive only.
     const transceiver = pc.addTransceiver("audio", { direction: this.localTrack ? "sendrecv" : "recvonly" });
-    await transceiver.sender.replaceTrack(this.localTrack);
+    await transceiver.sender.replaceTrack(this.sendTo.get(id) === true ? this.localTrack : null);
     await pc.setLocalDescription(await pc.createOffer());
     await waitForIceGathering(pc);
     this.sendSignal(id, pc.localDescription);
@@ -148,7 +178,7 @@ export class MeshVoiceProvider implements VoiceProvider {
         const transceiver = pc.getTransceivers()[0];
         if (transceiver) {
           transceiver.direction = "sendrecv";
-          await transceiver.sender.replaceTrack(this.localTrack);
+          await transceiver.sender.replaceTrack(this.sendTo.get(from) === true ? this.localTrack : null);
         }
         await pc.setLocalDescription(await pc.createAnswer());
         await waitForIceGathering(pc);

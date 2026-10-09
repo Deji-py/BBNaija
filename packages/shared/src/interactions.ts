@@ -45,7 +45,12 @@ export interface ToggleInteractable extends InteractableBase {
   promptOff: string;
 }
 
-export type Interactable = SlotInteractable | PoolInteractable | ToggleInteractable;
+/** Only usable during a task (e.g. the fridge and counter in the cooking challenge). */
+export interface TaskInteractable extends InteractableBase {
+  kind: "task";
+}
+
+export type Interactable = SlotInteractable | PoolInteractable | ToggleInteractable | TaskInteractable;
 
 const EAST = Math.PI / 2;
 const NORTH = Math.PI;
@@ -102,6 +107,9 @@ export const INTERACTABLES: readonly Interactable[] = [
   treadmill("treadmill-2", -11),
   { id: "pool", prompt: "Swim in the pool", range: 1.0, kind: "pool", activity: "swim", capacity: 6 },
   { id: "tv", prompt: "Turn the TV on", promptOff: "Turn the TV off", range: 3, kind: "toggle" },
+  // Cooking challenge steps.
+  { id: "fridge", prompt: "Grab ingredients", range: 1.2, kind: "task" },
+  { id: "counter", prompt: "Prep the ingredients", range: 1.2, kind: "task" },
 ];
 
 export const INTERACTABLE_BY_ID: ReadonlyMap<string, Interactable> = new Map(INTERACTABLES.map((i) => [i.id, i]));
@@ -117,11 +125,16 @@ export function distanceToObject(id: string, x: number, z: number): number {
   return Math.hypot(dx, dz);
 }
 
-/** The closest interactable within its range of (x, z), if any. */
-export function nearestInteractable(x: number, z: number): Interactable | undefined {
+/** The closest interactable within its range of (x, z) that passes `usable`, if any. */
+export function nearestInteractable(
+  x: number,
+  z: number,
+  usable: (it: Interactable) => boolean = () => true,
+): Interactable | undefined {
   let best: Interactable | undefined;
   let bestDist = Infinity;
   for (const it of INTERACTABLES) {
+    if (!usable(it)) continue;
     const d = distanceToObject(it.id, x, z);
     if (d <= it.range && d < bestDist) {
       best = it;
@@ -181,7 +194,7 @@ export function chooseSlot(it: SlotInteractable | PoolInteractable, from: Vec2, 
  */
 export function activityExit(id: string, x: number, z: number): Vec2 | null {
   const it = INTERACTABLE_BY_ID.get(id);
-  if (!it || it.kind === "toggle") return null;
+  if (!it || it.kind === "toggle" || it.kind === "task") return null;
   if (it.kind === "slots") {
     const slot = it.slots.find((s) => Math.hypot(s.x - x, s.z - z) < 0.1) ?? it.slots[0]!;
     return { x: slot.exitX, z: slot.exitZ };

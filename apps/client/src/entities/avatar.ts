@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { AnimState } from "@bbn/shared";
+import { REWARDS, type AnimState, type RewardId } from "@bbn/shared";
 import { mat } from "../scene/materials.js";
 import { createNameTag } from "./nameTag.js";
 import { ChatBubble } from "./chatBubble.js";
@@ -28,7 +28,10 @@ export class Avatar {
   private readonly rightArm: THREE.Group;
   private readonly leftLeg: THREE.Group;
   private readonly rightLeg: THREE.Group;
-  private readonly tag: THREE.Sprite;
+  private tag: THREE.Sprite;
+  private readonly name: string;
+  private readonly crown: THREE.Group;
+  private perksKey = "";
   private readonly voiceIcon = new VoiceIcon();
   private readonly bubble = new ChatBubble();
 
@@ -39,6 +42,7 @@ export class Avatar {
   private labelHeight = 2.15;
 
   constructor(name: string, color: THREE.ColorRepresentation) {
+    this.name = name;
     const shirt = mat(color);
     this.root.add(this.pose);
     this.pose.add(this.body);
@@ -65,6 +69,11 @@ export class Avatar {
     this.body.add(this.leftArm, this.rightArm);
     this.pose.add(this.leftLeg, this.rightLeg);
 
+    this.crown = buildCrown();
+    this.crown.position.y = 1.86;
+    this.crown.visible = false;
+    this.body.add(this.crown);
+
     // Labels hang off the root (not the pose) so they stay upright when lying down.
     this.tag = createNameTag(name);
     this.root.add(this.tag, this.voiceIcon.sprite, this.bubble.sprite);
@@ -77,6 +86,25 @@ export class Avatar {
 
   setVoiceState(state: VoiceIconState): void {
     this.voiceIcon.set(state);
+  }
+
+  /** Task rewards: a crown on the head, and badges after the name. */
+  setPerks(perks: readonly string[]): void {
+    const key = perks.join(",");
+    if (key === this.perksKey) return;
+    this.perksKey = key;
+    this.crown.visible = perks.includes("crown");
+    const badges = perks
+      .filter((p) => p !== "crown" && p in REWARDS)
+      .map((p) => REWARDS[p as RewardId].icon)
+      .join("");
+    const tag = createNameTag(badges ? `${this.name} ${badges}` : this.name);
+    tag.position.copy(this.tag.position);
+    this.root.remove(this.tag);
+    this.tag.material.map?.dispose();
+    this.tag.material.dispose();
+    this.tag = tag;
+    this.root.add(tag);
   }
 
   showChat(text: string): void {
@@ -200,6 +228,22 @@ export class Avatar {
     this.voiceIcon.sprite.position.y = this.labelHeight + 0.35;
     this.bubble.sprite.position.y = this.labelHeight + (this.voiceIcon.sprite.visible ? 0.55 : 0.22);
   }
+}
+
+/** Low-poly gold crown: a short open cylinder with five points. */
+function buildCrown(): THREE.Group {
+  const gold = mat(0xf2c230, { emissive: 0x3a2a00 });
+  const g = new THREE.Group();
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.15, 0.1, 10, 1, true), gold);
+  band.material.side = THREE.DoubleSide;
+  g.add(band);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    const point = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.1, 4), gold);
+    point.position.set(Math.sin(a) * 0.16, 0.09, Math.cos(a) * 0.16);
+    g.add(point);
+  }
+  return g;
 }
 
 /** A limb that pivots at its top joint (shoulder / hip). */

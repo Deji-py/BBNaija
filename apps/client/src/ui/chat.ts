@@ -1,4 +1,5 @@
 import { CHAT_MAX_LENGTH, type ChatMessage } from "@bbn/shared";
+import { isTyping } from "../input/keyboard.js";
 
 const VISIBLE_LINES = 50;
 
@@ -20,6 +21,8 @@ export class ChatPanel {
   private readonly list: HTMLElement;
   private readonly input: HTMLInputElement;
   private readonly seen = new Set<number>();
+  private enabled = true;
+  private readonly defaultPlaceholder: string;
 
   constructor(
     parent: HTMLElement,
@@ -38,7 +41,8 @@ export class ChatPanel {
     this.list = this.el.querySelector(".chat-list")!;
     this.input = this.el.querySelector(".chat-input")!;
     this.list.setAttribute("aria-label", options.label ?? "House chat");
-    this.input.placeholder = options.placeholder ?? "Press Enter to chat";
+    this.defaultPlaceholder = options.placeholder ?? "Press Enter to chat";
+    this.input.placeholder = this.defaultPlaceholder;
     if (options.readOnly) {
       this.el.querySelector("form")!.remove();
       return;
@@ -62,11 +66,30 @@ export class ChatPanel {
     this.input.addEventListener("blur", () => this.el.classList.remove("typing"));
 
     window.addEventListener("keydown", (e) => {
+      if (!this.enabled || this.el.hidden || isTyping(e)) return; // typing in some other field
       if (e.key === "Enter" && document.activeElement !== this.input) {
         e.preventDefault();
         this.input.focus();
       }
     });
+  }
+
+  /** Turn the input off (with an explanation in its place) or back on. */
+  setEnabled(enabled: boolean, reason?: string): void {
+    if (enabled === this.enabled && (enabled || this.input.placeholder === reason)) return;
+    this.enabled = enabled;
+    this.input.disabled = !enabled;
+    this.input.placeholder = enabled ? this.defaultPlaceholder : (reason ?? "");
+    if (!enabled) this.input.blur();
+  }
+
+  setVisible(visible: boolean): void {
+    this.el.hidden = !visible;
+  }
+
+  clear(): void {
+    this.list.replaceChildren();
+    this.seen.clear();
   }
 
   add(msg: ChatMessage): void {

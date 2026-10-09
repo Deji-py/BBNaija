@@ -1,16 +1,16 @@
 import { Room, type Client } from "colyseus";
 import {
-  AVATAR_COLORS,
+  CloseCode,
   EMOTES,
   INTERACTABLE_BY_ID,
   MAX_AUDIO_VIEWERS,
   MAX_HOUSEMATES,
   MAX_VIEWERS,
-  MAX_SDP_LENGTH,
   Msg,
-  NAME_MAX_LENGTH,
   REACTIONS,
+  REWARD_IDS,
   SPAWN_POINT,
+  TASKS,
   TICK_RATE_HZ,
   activityExit,
   applyInputStep,
@@ -18,20 +18,27 @@ import {
   chooseSlot,
   distanceToObject,
   type AnimState,
+  type AnnouncementMessage,
+  type ChatMessage,
   type EmoteName,
   type InputMessage,
   type JoinOptions,
   type Reaction,
   type ReactionMessage,
+  type RewardId,
+  type SlotInteractable,
+  type TaskType,
   type ViewerWelcome,
   type VoicePeerLeft,
-  type VoiceSignalMessage,
   type VoiceSignalRelay,
-  type VoiceStateMessage,
 } from "@bbn/shared";
+import { isAdminSecret } from "../config.js";
 import { HouseState, Player } from "../schema/HouseState.js";
 import { ChatLog } from "../systems/chat.js";
+import { EventLog } from "../systems/eventLog.js";
 import { RateLimiter } from "../systems/rateLimit.js";
+import { TaskRunner } from "../systems/tasks.js";
+import { field, parseInput, parseVoiceSignal, parseVoiceState, sanitizeColor, sanitizeName } from "./parse.js";
 
 /** Inputs a client may have waiting before we start dropping them. */
 const MAX_QUEUED_INPUTS = 10;
@@ -54,6 +61,9 @@ const WALK_GRACE_TICKS = 2;
 /** How long a wave lasts. Dancing continues until you move or emote again. */
 const WAVE_TICKS = Math.round(2.5 * TICK_RATE_HZ);
 
+/** How Big Brother appears in house chat and the Diary Room. */
+const BIG_BROTHER = { id: "bigbrother", name: "Big Brother", color: "#e0243b" } as const;
+
 interface Viewer {
   name: string;
   color: string;
@@ -73,10 +83,13 @@ interface PlayerSim {
  * One live house. The server is authoritative: clients only send *inputs*
  * ("I want to move this way"), the server applies them with the shared
  * collision code and broadcasts the resulting positions.
+ *
+ * Three kinds of client share the room: housemates (in `state.players`),
+ * viewers (watching via /watch) and the Big Brother console (/bigbrother).
  */
 export class HouseRoom extends Room<{ state: HouseState }> {
-  // Housemates and viewers share the room; onJoin enforces each limit separately.
-  override maxClients = MAX_HOUSEMATES + MAX_VIEWERS;
+  // Housemates, viewers and the console share the room; onJoin enforces each limit separately.
+  override maxClients = MAX_HOUSEMATES + MAX_VIEWERS + 1;
   override state = new HouseState();
   override patchRate = 1000 / TICK_RATE_HZ;
   override maxMessagesPerSecond = 60;
@@ -87,102 +100,47 @@ export class HouseRoom extends Room<{ state: HouseState }> {
   private readonly viewers = new Map<string, Viewer>();
   private readonly viewerChat = new ChatLog();
   private readonly reactionLimiter = new RateLimiter(5, 300);
+  private readonly events = new EventLog((entry) => this.sendToAdmin(Msg.adminLog, [entry]));
+  private tasks!: TaskRunner;
+  private diaryChatId = 1;
+
+  /** Only the Big Brother console needs a check; everyone else may join (limits are applied in onJoin). */
+  override onAuth(_client: Client, options: Partial<JoinOptions> = {}): boolean {
+    if (options.role === "admin" && !isAdminSecret(options.adminSecret)) throw new Error("Wrong admin secret");
+    return true;
+  }
 
   override onCreate(): void {
     this.state.tvOn = false;
     this.state.viewerCount = 0;
+    this.state.bigBrotherId = "";
+    this.state.bigBrotherSpeaking = false;
+    this.state.diaryHousemate = "";
+    this.state.diaryBroadcast = true;
+    this.state.serverTime = Date.now();
 
-    this.onMessage(Msg.input, (client, message: unknown) => {
-      const input = parseInput(message);
-      const sim = this.sims.get(client.sessionId);
-      if (!input || !sim) return;
-      if (sim.queue.length >= MAX_QUEUED_INPUTS) return;
-      sim.queue.push(input);
+    this.tasks = new TaskRunner(this.state, this.clock, {
+      log: (type, text) => this.events.add(type, text),
+      announce: (text) => this.announce(text),
+      standUp: (player) => {
+        const sim = this.sims.get(player.id);
+        if (sim && player.activity) this.standUp(player, sim);
+      },
     });
 
-    // WebRTC signalling: the server never touches audio, it just forwards the
-    // connection offer/answer between two housemates so they can link up directly.
-    // Allowed links: housemate ↔ housemate, and viewer → housemate (listen-only).
-    // Never viewer ↔ viewer.
-    this.onMessage(Msg.voiceSignal, (client, message: unknown) => {
-      const signal = parseVoiceSignal(message);
-      if (!signal || signal.to === client.sessionId) return;
-      const target = this.clients.getById(signal.to);
-      if (!target) return;
-      const senderIsHousemate = this.state.players.get(client.sessionId)?.voice === true;
-      const targetIsHousemate = this.state.players.get(signal.to)?.voice === true;
-      const senderIsListener = this.viewers.get(client.sessionId)?.audio === true;
-      const targetIsListener = this.viewers.get(signal.to)?.audio === true;
-      const allowed =
-        (senderIsHousemate && (targetIsHousemate || targetIsListener)) || (senderIsListener && targetIsHousemate);
-      if (!allowed) return;
-      const relay: VoiceSignalRelay = { from: client.sessionId, data: signal.data };
-      target.send(Msg.voiceSignal, relay);
-    });
-
-    this.onMessage(Msg.voiceState, (client, message: unknown) => {
-      const state = parseVoiceState(message);
-      const player = this.state.players.get(client.sessionId);
-      if (!state || !player) return;
-      if (player.speaking !== state.speaking) player.speaking = state.speaking;
-      if (player.muted !== state.muted) player.muted = state.muted;
-    });
-
-    this.onMessage(Msg.action, (client, message: unknown) => {
-      const objectId = (message as { objectId?: unknown } | null)?.objectId;
-      if (typeof objectId === "string") this.handleAction(client.sessionId, objectId);
-    });
-
-    this.onMessage(Msg.emote, (client, message: unknown) => {
-      const name = (message as { name?: unknown } | null)?.name;
-      const player = this.state.players.get(client.sessionId);
-      const sim = this.sims.get(client.sessionId);
-      if (!player || !sim || !EMOTES.includes(name as EmoteName) || player.activity) return;
-      if (name === "dance" && sim.emote === "dance") {
-        sim.emote = null; // pressing dance again stops dancing
-      } else {
-        sim.emote = name as EmoteName;
-        sim.emoteTicksLeft = name === "wave" ? WAVE_TICKS : Infinity;
-      }
-      this.updateAnim(player, sim);
-    });
-
-    this.onMessage(Msg.chat, (client, message: unknown) => {
-      const player = this.state.players.get(client.sessionId);
-      const text = ChatLog.sanitize((message as { text?: unknown } | null)?.text);
-      if (!player || !text || !this.chat.allow(client.sessionId)) return;
-      this.broadcast(Msg.chat, this.chat.add(player, text));
-    });
-
-    this.onMessage(Msg.chatHistory, (client) => {
-      client.send(Msg.chatHistory, this.chat.recent());
-    });
-
-    // --- viewers only ---
-    this.onMessage(Msg.viewerChat, (client, message: unknown) => {
-      const viewer = this.viewers.get(client.sessionId);
-      const text = ChatLog.sanitize((message as { text?: unknown } | null)?.text);
-      if (!viewer || !text || !this.viewerChat.allow(client.sessionId)) return;
-      this.sendToViewers(Msg.viewerChat, this.viewerChat.add({ id: client.sessionId, ...viewer }, text));
-    });
-
-    this.onMessage(Msg.viewerChatHistory, (client) => {
-      if (this.viewers.has(client.sessionId)) client.send(Msg.viewerChatHistory, this.viewerChat.recent());
-    });
-
-    this.onMessage(Msg.viewerReact, (client, message: unknown) => {
-      const emoji = (message as { emoji?: unknown } | null)?.emoji;
-      if (!this.viewers.has(client.sessionId) || !REACTIONS.includes(emoji as Reaction)) return;
-      if (!this.reactionLimiter.allow(client.sessionId)) return;
-      const reaction: ReactionMessage = { emoji: emoji as Reaction };
-      this.sendToViewers(Msg.viewerReact, reaction);
-    });
+    this.registerHousemateMessages();
+    this.registerVoiceMessages();
+    this.registerViewerMessages();
+    this.registerAdminMessages();
 
     this.setSimulationInterval(() => this.tick(), 1000 / TICK_RATE_HZ);
-    console.log(`[house ${this.roomId}] created`);
+    // Clients line their countdowns up with this.
+    this.clock.setInterval(() => (this.state.serverTime = Date.now()), 1000);
+    this.events.add("room", "House opened");
   }
 
   override onJoin(client: Client, options: Partial<JoinOptions> = {}): void {
+    if (options.role === "admin") return this.joinAdmin(client);
     if (options.role === "viewer") return this.joinViewer(client, options);
     if (this.state.players.size >= MAX_HOUSEMATES) throw new Error("The house is full");
 
@@ -202,6 +160,8 @@ export class HouseRoom extends Room<{ state: HouseState }> {
     player.speaking = false;
     player.muted = true;
     player.activity = "";
+    player.adminMuted = false;
+    player.cookStage = 0;
 
     this.state.players.set(client.sessionId, player);
     this.sims.set(client.sessionId, {
@@ -211,67 +171,109 @@ export class HouseRoom extends Room<{ state: HouseState }> {
       emote: null,
       emoteTicksLeft: 0,
     });
-    console.log(`[house ${this.roomId}] ${player.name} joined (${this.state.players.size}/${this.maxClients})`);
+    this.tasks.running?.scores.set(client.sessionId, 0);
+    this.events.add("join", `${player.name} entered the house (${this.state.players.size}/${MAX_HOUSEMATES})`);
   }
 
   override onLeave(client: Client): void {
-    const viewer = this.viewers.get(client.sessionId);
+    const id = client.sessionId;
+
+    if (id === this.state.bigBrotherId) {
+      this.state.bigBrotherId = "";
+      this.state.bigBrotherSpeaking = false;
+      if (this.state.diaryHousemate) this.endDiary("the console closed");
+      this.events.add("admin", "Big Brother console disconnected");
+      return;
+    }
+
+    const viewer = this.viewers.get(id);
     if (viewer) {
-      this.viewers.delete(client.sessionId);
-      this.viewerChat.forget(client.sessionId);
-      this.reactionLimiter.forget(client.sessionId);
+      this.viewers.delete(id);
+      this.viewerChat.forget(id);
+      this.reactionLimiter.forget(id);
       this.state.viewerCount = this.viewers.size;
       if (viewer.audio) {
-        const left: VoicePeerLeft = { id: client.sessionId };
+        const left: VoicePeerLeft = { id };
         this.sendToHousemates(Msg.voicePeerLeft, left);
+        this.sendToAdmin(Msg.voicePeerLeft, left);
       }
       return;
     }
 
-    const player = this.state.players.get(client.sessionId);
-    this.state.players.delete(client.sessionId);
-    this.sims.delete(client.sessionId);
-    this.chat.forget(client.sessionId);
-    console.log(`[house ${this.roomId}] ${player?.name ?? client.sessionId} left`);
+    const player = this.state.players.get(id);
+    if (id === this.state.diaryHousemate) this.state.diaryHousemate = "";
+    this.state.players.delete(id);
+    this.sims.delete(id);
+    this.chat.forget(id);
+    this.tasks.onPlayerLeft(id);
+    this.events.add("leave", `${player?.name ?? id} left the house`);
   }
 
   override onDispose(): void {
     console.log(`[house ${this.roomId}] disposed`);
   }
 
-  private joinViewer(client: Client, options: Partial<JoinOptions>): void {
-    if (this.viewers.size >= MAX_VIEWERS) throw new Error("This house is full of viewers right now");
-    const audioSlotsUsed = [...this.viewers.values()].filter((v) => v.audio).length;
-    const viewer: Viewer = {
-      name: sanitizeName(options.name, `Viewer ${Math.floor(1000 + Math.random() * 9000)}`),
-      color: sanitizeColor(options.color),
-      audio: options.voice === true && audioSlotsUsed < MAX_AUDIO_VIEWERS,
-    };
-    this.viewers.set(client.sessionId, viewer);
-    this.state.viewerCount = this.viewers.size;
-    const welcome: ViewerWelcome = { audio: viewer.audio };
-    client.send(Msg.viewerWelcome, welcome);
-  }
+  // ---------------------------------------------------------------- housemates
 
-  private sendToViewers(type: string, message: unknown): void {
-    for (const c of this.clients) if (this.viewers.has(c.sessionId)) c.send(type, message);
-  }
-
-  private sendToHousemates(type: string, message: unknown): void {
-    for (const c of this.clients) if (this.state.players.has(c.sessionId)) c.send(type, message);
-  }
-
-  /**
-   * Spawn slots form a small circle around the spawn point, so new arrivals
-   * don't stack on top of each other. Takes the first slot nobody is standing on.
-   */
-  private freeSpawnPoint(): { x: number; z: number } {
-    const slots = Array.from({ length: MAX_HOUSEMATES }, (_, i) => {
-      const angle = (i / MAX_HOUSEMATES) * Math.PI * 2;
-      return { x: SPAWN_POINT.x + Math.sin(angle) * 1.2, z: SPAWN_POINT.z + Math.cos(angle) * 1.2 };
+  private registerHousemateMessages(): void {
+    this.onMessage(Msg.input, (client, message: unknown) => {
+      const input = parseInput(message);
+      const sim = this.sims.get(client.sessionId);
+      if (!input || !sim) return;
+      if (sim.queue.length >= MAX_QUEUED_INPUTS) return;
+      sim.queue.push(input);
     });
-    const players = [...this.state.players.values()];
-    return slots.find((s) => players.every((p) => Math.hypot(p.x - s.x, p.z - s.z) > 0.8)) ?? slots[0]!;
+
+    this.onMessage(Msg.action, (client, message: unknown) => {
+      const objectId = field(message, "objectId");
+      if (typeof objectId === "string") this.handleAction(client.sessionId, objectId);
+    });
+
+    this.onMessage(Msg.emote, (client, message: unknown) => {
+      const name = field(message, "name");
+      const player = this.state.players.get(client.sessionId);
+      const sim = this.sims.get(client.sessionId);
+      if (!player || !sim || !EMOTES.includes(name as EmoteName) || player.activity) return;
+      if (this.isInDiary(player.id)) return;
+      if (name === "dance" && sim.emote === "dance") {
+        sim.emote = null; // pressing dance again stops dancing
+      } else {
+        sim.emote = name as EmoteName;
+        sim.emoteTicksLeft = name === "wave" ? WAVE_TICKS : Infinity;
+      }
+      this.updateAnim(player, sim);
+    });
+
+    this.onMessage(Msg.chat, (client, message: unknown) => {
+      const player = this.state.players.get(client.sessionId);
+      const text = ChatLog.sanitize(field(message, "text"));
+      if (!player || !text || player.adminMuted || this.isInDiary(player.id)) return;
+      if (!this.chat.allow(client.sessionId)) return;
+      this.broadcast(Msg.chat, this.chat.add(player, text));
+    });
+
+    this.onMessage(Msg.chatHistory, (client) => {
+      client.send(Msg.chatHistory, this.chat.recent());
+    });
+
+    this.onMessage(Msg.quizAnswer, (client, message: unknown) => {
+      const answer = field(message, "answer");
+      if (typeof answer === "number") this.tasks.onQuizAnswer(client.sessionId, answer);
+    });
+
+    // Diary Room text: between Big Brother and the housemate in session (viewers too when broadcast).
+    this.onMessage(Msg.diaryChat, (client, message: unknown) => {
+      const isAdmin = client.sessionId === this.state.bigBrotherId;
+      const player = this.state.players.get(client.sessionId);
+      if (!this.state.diaryHousemate || (!isAdmin && client.sessionId !== this.state.diaryHousemate)) return;
+      const text = ChatLog.sanitize(field(message, "text"));
+      if (!text || !this.chat.allow(`diary:${client.sessionId}`)) return;
+      const from = isAdmin ? BIG_BROTHER : player!;
+      const msg: ChatMessage = { id: this.diaryChatId++, fromId: from.id, name: from.name, color: from.color, text, at: Date.now() };
+      this.clients.getById(this.state.diaryHousemate)?.send(Msg.diaryChat, msg);
+      this.sendToAdmin(Msg.diaryChat, msg);
+      if (this.state.diaryBroadcast) this.sendToViewers(Msg.diaryChat, msg);
+    });
   }
 
   /**
@@ -281,8 +283,15 @@ export class HouseRoom extends Room<{ state: HouseState }> {
   private handleAction(playerId: string, objectId: string): void {
     const player = this.state.players.get(playerId);
     const sim = this.sims.get(playerId);
+    if (!player || !sim || this.isInDiary(playerId)) return;
+
+    if (objectId.startsWith("gem:")) {
+      this.tasks.pickGem(player, objectId.slice(4));
+      return;
+    }
+
     const it = INTERACTABLE_BY_ID.get(objectId);
-    if (!player || !sim || !it) return;
+    if (!it) return;
 
     // E while using something = get up.
     if (player.activity) {
@@ -295,13 +304,21 @@ export class HouseRoom extends Room<{ state: HouseState }> {
       this.state.tvOn = !this.state.tvOn;
       return;
     }
+    if (it.kind === "task") {
+      this.tasks.onTaskObject(player, objectId);
+      return;
+    }
 
     const occupied = [...this.state.players.values()].filter((p) => p.activity === objectId);
     const slot = chooseSlot(it, player, occupied);
     if (!slot) return; // full
+    this.placeInSlot(player, sim, objectId, slot);
+  }
 
-    // Drop movement still queued from before pressing E, and tell the client we've
-    // handled it so its prediction doesn't replay those steps.
+  /** Put a player into an object's spot (seat, bed…), cancelling queued movement. */
+  private placeInSlot(player: Player, sim: PlayerSim, objectId: string, slot: { x: number; z: number; rotY: number }): void {
+    // Drop movement still queued from before, and tell the client we've handled it
+    // so its prediction doesn't replay those steps.
     const last = sim.queue.at(-1);
     if (last) player.lastSeq = last.seq;
     sim.queue.length = 0;
@@ -328,10 +345,27 @@ export class HouseRoom extends Room<{ state: HouseState }> {
   private updateAnim(player: Player, sim: PlayerSim): void {
     let anim: AnimState;
     const it = player.activity ? INTERACTABLE_BY_ID.get(player.activity) : undefined;
-    if (it && it.kind !== "toggle") anim = it.activity;
+    if (it && (it.kind === "slots" || it.kind === "pool")) anim = it.activity;
     else if (sim.emote) anim = sim.emote;
     else anim = sim.ticksSinceStep < WALK_GRACE_TICKS ? "walk" : "idle";
     if (player.anim !== anim) player.anim = anim;
+  }
+
+  /**
+   * Spawn slots form a small circle around the spawn point, so new arrivals
+   * don't stack on top of each other. Takes the first slot nobody is standing on.
+   */
+  private freeSpawnPoint(): { x: number; z: number } {
+    const slots = Array.from({ length: MAX_HOUSEMATES }, (_, i) => {
+      const angle = (i / MAX_HOUSEMATES) * Math.PI * 2;
+      return { x: SPAWN_POINT.x + Math.sin(angle) * 1.2, z: SPAWN_POINT.z + Math.cos(angle) * 1.2 };
+    });
+    const players = [...this.state.players.values()];
+    return slots.find((s) => players.every((p) => Math.hypot(p.x - s.x, p.z - s.z) > 0.8)) ?? slots[0]!;
+  }
+
+  private isInDiary(playerId: string): boolean {
+    return playerId === this.state.diaryHousemate;
   }
 
   /** One server tick: apply queued inputs to each player within their movement budget. */
@@ -341,6 +375,13 @@ export class HouseRoom extends Room<{ state: HouseState }> {
       if (!player) continue;
 
       sim.credit = Math.min(sim.credit + 1, MAX_INPUT_CREDIT);
+
+      if (this.isInDiary(id)) {
+        // Held in the Diary Room chair: acknowledge inputs (so prediction stays in step) but don't move.
+        const last = sim.queue.at(-1);
+        if (last) player.lastSeq = last.seq;
+        sim.queue.length = 0;
+      }
 
       const steps = sim.queue.length > JITTER_BUFFER_TARGET ? 2 : 1;
       for (let i = 0; i < steps && sim.credit >= 1 && sim.queue.length > 0; i++) {
@@ -365,40 +406,206 @@ export class HouseRoom extends Room<{ state: HouseState }> {
       const area = areaAt(player.x, player.z)?.id ?? "";
       if (player.area !== area) player.area = area;
     }
+    this.tasks.tick();
   }
-}
 
-function parseInput(message: unknown): InputMessage | null {
-  if (typeof message !== "object" || message === null) return null;
-  const { seq, dx, dz } = message as Record<string, unknown>;
-  if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0) return null;
-  if (typeof dx !== "number" || typeof dz !== "number") return null;
-  if (!Number.isFinite(dx) || !Number.isFinite(dz)) return null;
-  return { seq, dx, dz };
-}
+  // ---------------------------------------------------------------- voice
 
-function parseVoiceSignal(message: unknown): VoiceSignalMessage | null {
-  if (typeof message !== "object" || message === null) return null;
-  const { to, data } = message as Record<string, unknown>;
-  if (typeof to !== "string" || typeof data !== "object" || data === null) return null;
-  const { type, sdp } = data as Record<string, unknown>;
-  if (type !== "offer" && type !== "answer") return null;
-  if (typeof sdp !== "string" || sdp.length > MAX_SDP_LENGTH) return null;
-  return { to, data: { type, sdp } };
-}
+  private registerVoiceMessages(): void {
+    // WebRTC signalling: the server never touches audio, it just forwards the
+    // connection offer/answer so two browsers can link up directly.
+    // Allowed links: housemate ↔ housemate, housemate ↔ Big Brother, and
+    // listening viewer → housemate. Never viewer ↔ viewer or viewer ↔ Big Brother.
+    // (Who actually hears whom on those links is decided by voicePolicy.ts on each client.)
+    this.onMessage(Msg.voiceSignal, (client, message: unknown) => {
+      const signal = parseVoiceSignal(message);
+      if (!signal || signal.to === client.sessionId) return;
+      const target = this.clients.getById(signal.to);
+      if (!target) return;
+      const kind = (id: string) =>
+        this.state.players.get(id)?.voice
+          ? "housemate"
+          : id === this.state.bigBrotherId
+            ? "admin"
+            : this.viewers.get(id)?.audio
+              ? "listener"
+              : "none";
+      const from = kind(client.sessionId);
+      const to = kind(signal.to);
+      const allowed =
+        (from === "housemate" && to !== "none") || ((from === "admin" || from === "listener") && to === "housemate");
+      if (!allowed) return;
+      const relay: VoiceSignalRelay = { from: client.sessionId, data: signal.data };
+      target.send(Msg.voiceSignal, relay);
+    });
 
-function parseVoiceState(message: unknown): VoiceStateMessage | null {
-  if (typeof message !== "object" || message === null) return null;
-  const { speaking, muted } = message as Record<string, unknown>;
-  if (typeof speaking !== "boolean" || typeof muted !== "boolean") return null;
-  return { speaking, muted };
-}
+    this.onMessage(Msg.voiceState, (client, message: unknown) => {
+      const state = parseVoiceState(message);
+      if (!state) return;
+      if (client.sessionId === this.state.bigBrotherId) {
+        this.state.bigBrotherSpeaking = state.speaking;
+        return;
+      }
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const speaking = state.speaking && !player.adminMuted;
+      if (player.speaking !== speaking) player.speaking = speaking;
+      if (player.muted !== state.muted) player.muted = state.muted;
+    });
+  }
 
-function sanitizeName(raw: unknown, fallback = "Housemate"): string {
-  const name = typeof raw === "string" ? raw.replace(/[\p{C}]/gu, "").trim().slice(0, NAME_MAX_LENGTH) : "";
-  return name || fallback;
-}
+  // ---------------------------------------------------------------- viewers
 
-function sanitizeColor(raw: unknown): string {
-  return typeof raw === "string" && /^#[0-9a-f]{6}$/i.test(raw) ? raw.toLowerCase() : AVATAR_COLORS[0];
+  private registerViewerMessages(): void {
+    this.onMessage(Msg.viewerChat, (client, message: unknown) => {
+      const viewer = this.viewers.get(client.sessionId);
+      const text = ChatLog.sanitize(field(message, "text"));
+      if (!viewer || !text || !this.viewerChat.allow(client.sessionId)) return;
+      this.sendToViewers(Msg.viewerChat, this.viewerChat.add({ id: client.sessionId, ...viewer }, text));
+    });
+
+    this.onMessage(Msg.viewerChatHistory, (client) => {
+      if (this.viewers.has(client.sessionId)) client.send(Msg.viewerChatHistory, this.viewerChat.recent());
+    });
+
+    this.onMessage(Msg.viewerReact, (client, message: unknown) => {
+      const emoji = field(message, "emoji");
+      if (!this.viewers.has(client.sessionId) || !REACTIONS.includes(emoji as Reaction)) return;
+      if (!this.reactionLimiter.allow(client.sessionId)) return;
+      const reaction: ReactionMessage = { emoji: emoji as Reaction };
+      this.sendToViewers(Msg.viewerReact, reaction);
+    });
+  }
+
+  private joinViewer(client: Client, options: Partial<JoinOptions>): void {
+    if (this.viewers.size >= MAX_VIEWERS) throw new Error("This house is full of viewers right now");
+    const audioSlotsUsed = [...this.viewers.values()].filter((v) => v.audio).length;
+    const viewer: Viewer = {
+      name: sanitizeName(options.name, `Viewer ${Math.floor(1000 + Math.random() * 9000)}`),
+      color: sanitizeColor(options.color),
+      audio: options.voice === true && audioSlotsUsed < MAX_AUDIO_VIEWERS,
+    };
+    this.viewers.set(client.sessionId, viewer);
+    this.state.viewerCount = this.viewers.size;
+    const welcome: ViewerWelcome = { audio: viewer.audio };
+    client.send(Msg.viewerWelcome, welcome);
+  }
+
+  // ---------------------------------------------------------------- Big Brother
+
+  private joinAdmin(client: Client): void {
+    // One console at a time: a new one takes over (e.g. after a page reload).
+    const previous = this.state.bigBrotherId ? this.clients.getById(this.state.bigBrotherId) : undefined;
+    previous?.leave(CloseCode.consoleTakenOver);
+    this.state.bigBrotherId = client.sessionId;
+    this.state.bigBrotherSpeaking = false;
+    client.send(Msg.adminLog, this.events.all());
+    this.events.add("admin", "Big Brother console connected");
+  }
+
+  private registerAdminMessages(): void {
+    /** Registers a handler that silently ignores anyone but the console. */
+    const admin = (type: string, handler: (message: unknown, client: Client) => void) =>
+      this.onMessage(type, (client, message: unknown) => {
+        if (client.sessionId === this.state.bigBrotherId) handler(message, client);
+      });
+
+    admin(Msg.adminAnnounce, (message) => {
+      const text = ChatLog.sanitize(field(message, "text"));
+      if (text) this.announce(text);
+    });
+
+    admin(Msg.adminCallDiary, (message) => {
+      const id = field(message, "playerId");
+      if (typeof id === "string") this.callToDiary(id);
+    });
+
+    admin(Msg.adminEndDiary, () => this.endDiary("Big Brother ended the session"));
+
+    admin(Msg.adminDiaryBroadcast, (message) => {
+      const broadcast = field(message, "broadcast");
+      if (typeof broadcast !== "boolean") return;
+      this.state.diaryBroadcast = broadcast;
+      this.events.add("diary", `Diary Room ${broadcast ? "is broadcast to viewers" : "is private"}`);
+    });
+
+    admin(Msg.adminStartTask, (message) => {
+      const type = field(message, "type");
+      const reward = field(message, "reward");
+      if (!(typeof type === "string" && type in TASKS) || !REWARD_IDS.includes(reward as RewardId)) return;
+      this.tasks.start(type as TaskType, reward as RewardId);
+    });
+
+    admin(Msg.adminEndTask, () => this.tasks.end("admin"));
+
+    admin(Msg.adminMute, (message) => {
+      const id = field(message, "playerId");
+      const muted = field(message, "muted");
+      const player = typeof id === "string" ? this.state.players.get(id) : undefined;
+      if (!player || typeof muted !== "boolean") return;
+      player.adminMuted = muted;
+      if (muted) player.speaking = false;
+      this.events.add("moderation", `${player.name} was ${muted ? "muted" : "unmuted"} by Big Brother`);
+    });
+
+    admin(Msg.adminKick, (message) => {
+      const id = field(message, "playerId");
+      const player = typeof id === "string" ? this.state.players.get(id) : undefined;
+      if (!player) return;
+      this.events.add("moderation", `${player.name} was removed from the house by Big Brother`);
+      this.clients.getById(player.id)?.leave(CloseCode.kicked);
+    });
+  }
+
+  /** Text banner for everyone, also kept in house chat. */
+  private announce(text: string): void {
+    const message: AnnouncementMessage = { text, to: "all" };
+    this.broadcast(Msg.announcement, message);
+    this.broadcast(Msg.chat, this.chat.add(BIG_BROTHER, text));
+    this.events.add("announcement", text);
+  }
+
+  private callToDiary(playerId: string): void {
+    const player = this.state.players.get(playerId);
+    const sim = this.sims.get(playerId);
+    if (!player || !sim || this.state.diaryHousemate === playerId) return;
+    if (this.state.diaryHousemate) this.endDiary("another housemate was called");
+
+    // Clear the chair if someone's sitting in it, and get the caller up from whatever they're doing.
+    for (const p of this.state.players.values()) {
+      const s = this.sims.get(p.id);
+      if (p.activity === "diary-chair" && s) this.standUp(p, s);
+    }
+    if (player.activity) this.standUp(player, sim);
+
+    const chair = INTERACTABLE_BY_ID.get("diary-chair") as SlotInteractable;
+    this.placeInSlot(player, sim, "diary-chair", chair.slots[0]!);
+    this.state.diaryHousemate = playerId;
+
+    const call: AnnouncementMessage = { text: "Big Brother would like to see you in the Diary Room.", to: playerId };
+    this.clients.getById(playerId)?.send(Msg.announcement, call);
+    this.events.add("diary", `${player.name} was called to the Diary Room`);
+  }
+
+  private endDiary(reason: string): void {
+    const player = this.state.players.get(this.state.diaryHousemate);
+    const sim = player && this.sims.get(player.id);
+    this.state.diaryHousemate = "";
+    if (player && sim && player.activity === "diary-chair") this.standUp(player, sim);
+    if (player) this.events.add("diary", `${player.name} left the Diary Room (${reason})`);
+  }
+
+  // ---------------------------------------------------------------- helpers
+
+  private sendToViewers(type: string, message: unknown): void {
+    for (const c of this.clients) if (this.viewers.has(c.sessionId)) c.send(type, message);
+  }
+
+  private sendToHousemates(type: string, message: unknown): void {
+    for (const c of this.clients) if (this.state.players.has(c.sessionId)) c.send(type, message);
+  }
+
+  private sendToAdmin(type: string, message: unknown): void {
+    if (this.state.bigBrotherId) this.clients.getById(this.state.bigBrotherId)?.send(type, message);
+  }
 }

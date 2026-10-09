@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import {
   Msg,
+  type AnnouncementMessage,
   type ChatMessage,
   type ChatSendMessage,
   type ReactionMessage,
@@ -18,6 +19,10 @@ import { SpectatorHud, areaForKey } from "../ui/spectatorHud.js";
 import { MeshVoiceProvider } from "../voice/meshVoice.js";
 import { SpatialAudio } from "../voice/spatialAudio.js";
 import { PlayersView } from "./playersView.js";
+import { applyVoiceRouting } from "../voice/voiceRouting.js";
+import { Banners } from "../ui/banner.js";
+import { TaskPanel } from "../ui/taskPanel.js";
+import { GemsView } from "../scene/gems.js";
 
 /**
  * Spectator mode (/watch). There is no avatar: the viewer receives the same
@@ -107,6 +112,21 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
   room.onMessage(Msg.viewerChat, (msg: ChatMessage) => viewerChat.add(msg));
   room.onMessage(Msg.viewerChatHistory, (h: ChatMessage[]) => h.forEach((m) => viewerChat.add(m)));
   room.onMessage(Msg.viewerReact, ({ emoji }: ReactionMessage) => hud.floatReaction(emoji));
+
+  // Big Brother: announcements, tasks (watch only), Diary Room transcript when it's broadcast.
+  const banners = new Banners(container);
+  const taskPanel = new TaskPanel(container, {});
+  const gems = new GemsView(scene);
+  room.onMessage(Msg.announcement, ({ text, to }: AnnouncementMessage) => {
+    if (to === "all") banners.announce(text);
+  });
+  const diaryChat = new ChatPanel(container, () => {}, { className: "diary-chat", label: "Diary Room", readOnly: true });
+  diaryChat.setVisible(false);
+  room.onMessage(Msg.diaryChat, (msg: ChatMessage) => diaryChat.add(msg));
+  let diaryShown = "";
+  const routingTimer = setInterval(() => {
+    if (voice) applyVoiceRouting(voice, room.sessionId, room.state);
+  }, 100);
   room.send(Msg.chatHistory);
   room.send(Msg.viewerChatHistory);
 
@@ -119,6 +139,7 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
 
   room.onLeave((code) => {
     renderer.setAnimationLoop(null);
+    clearInterval(routingTimer);
     voice?.leave();
     showDisconnected(container, code === 1000 ? "You stopped watching." : `Lost connection to the house (code ${code}).`);
   });
@@ -139,6 +160,26 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
     voice?.setListenerPosition({ x: ears.x, y: ears.y, z: ears.z }, ears.yaw);
 
     hud.setHousemates([...(room.state.players?.entries() ?? [])], following);
+    if (voice) applyVoiceRouting(voice, room.sessionId, room.state);
+    taskPanel.update(room.state);
+    gems.update(dt, room.state.task);
+
+    const diaryWho = room.state.diaryHousemate ? room.state.players?.get(room.state.diaryHousemate)?.name : undefined;
+    const diaryKey = diaryWho ? `${diaryWho}|${room.state.diaryBroadcast}` : "";
+    if (diaryKey !== diaryShown) {
+      if (!diaryShown || !diaryKey.startsWith(diaryShown.split("|")[0]!)) diaryChat.clear();
+      diaryShown = diaryKey;
+      diaryChat.setVisible(!!diaryWho && room.state.diaryBroadcast);
+      banners.setStatus(
+        "diary",
+        diaryWho
+          ? room.state.diaryBroadcast
+            ? `🎙️ ${diaryWho} is in the Diary Room — press 6 to watch`
+            : `🔒 ${diaryWho} is in the Diary Room (private session)`
+          : null,
+        "live",
+      );
+    }
     house.tv.animate(dt);
     renderer.render(scene, camera);
   });

@@ -2,6 +2,7 @@ import { TICK_RATE_HZ } from "./constants.js";
 import { WALK_SPEED } from "./house.js";
 import { moveWithCollision, type Vec2 } from "./movement.js";
 import type { Activity, EmoteName } from "./interactions.js";
+import type { RewardId, TaskType } from "./tasks.js";
 
 /** Max housemates in one house. P2P voice (M3) gets heavy beyond ~8. */
 export const MAX_HOUSEMATES = 8;
@@ -31,8 +32,10 @@ export const AVATAR_COLORS = [
 export interface JoinOptions {
   name: string;
   color: string;
-  /** Housemate (default) or a spectator watching via /watch. */
-  role?: "housemate" | "viewer";
+  /** Housemate (default), a spectator watching via /watch, or the Big Brother console. */
+  role?: "housemate" | "viewer" | "admin";
+  /** Required for role "admin". */
+  adminSecret?: string;
   /** True for real browser clients that take part in voice chat (bots leave it off). For viewers: listen-only. */
   voice?: boolean;
 }
@@ -70,7 +73,74 @@ export const Msg = {
   viewerChatHistory: "viewer:chat-history",
   /** Viewer → server: an emoji reaction. Server → viewers: someone reacted. */
   viewerReact: "viewer:react",
+
+  /** Server → everyone: Big Brother announcement banner. */
+  announcement: "announcement",
+  /** Diary Room text between Big Brother and the housemate in session (and viewers when broadcast). */
+  diaryChat: "diary:chat",
+  /** Housemate → server: answer to the current quiz question. */
+  quizAnswer: "quiz:answer",
+
+  // Big Brother console → server
+  adminAnnounce: "admin:announce",
+  adminCallDiary: "admin:call-diary",
+  adminEndDiary: "admin:end-diary",
+  adminDiaryBroadcast: "admin:diary-broadcast",
+  adminStartTask: "admin:start-task",
+  adminEndTask: "admin:end-task",
+  adminMute: "admin:mute",
+  adminKick: "admin:kick",
+  /** Server → console: event log entries (an array; the full log right after joining). */
+  adminLog: "admin:log",
 } as const;
+
+/** WebSocket close codes the server uses when it removes someone. */
+export const CloseCode = {
+  kicked: 4001,
+  /** The Big Brother console was opened somewhere else. */
+  consoleTakenOver: 4002,
+} as const;
+
+export interface AnnouncementMessage {
+  text: string;
+  /** Who it's for: "all", or a single housemate's session id (e.g. a Diary Room call). */
+  to: "all" | string;
+}
+
+export interface DiaryChatMessage {
+  text: string;
+}
+
+export interface QuizAnswerMessage {
+  /** Option index 0–3. */
+  answer: number;
+}
+
+export interface AdminAnnounceMessage {
+  text: string;
+}
+export interface AdminTargetMessage {
+  playerId: string;
+}
+export interface AdminMuteMessage {
+  playerId: string;
+  muted: boolean;
+}
+export interface AdminStartTaskMessage {
+  type: TaskType;
+  reward: RewardId;
+}
+export interface AdminDiaryBroadcastMessage {
+  broadcast: boolean;
+}
+
+export interface EventLogEntry {
+  id: number;
+  /** Server time, ms since epoch. */
+  at: number;
+  type: string;
+  text: string;
+}
 
 export interface ViewerWelcome {
   /** Whether this viewer got one of the MAX_AUDIO_VIEWERS audio slots. */
@@ -186,6 +256,46 @@ export interface PlayerView {
   muted: boolean;
   /** Id of the object being used ("" when free). */
   activity: string;
+  /** Muted by Big Brother: no voice, no house chat. */
+  adminMuted: boolean;
+  /** Rewards won from tasks (RewardId values). */
+  perks: string[];
+  /** Cooking challenge progress (COOK_STAGE). */
+  cookStage: number;
+}
+
+export interface GemView {
+  id: string;
+  x: number;
+  z: number;
+  found: boolean;
+}
+
+export interface QuizView {
+  /** 1-based question number. */
+  number: number;
+  total: number;
+  question: string;
+  options: string[];
+  /** Answering closes at this server time (ms since epoch). */
+  endsAt: number;
+  revealed: boolean;
+  /** Correct option, -1 until revealed. */
+  correct: number;
+}
+
+export interface TaskView {
+  type: TaskType;
+  title: string;
+  description: string;
+  reward: RewardId;
+  status: "running" | "done";
+  /** Server time (ms) the task ends; 0 for the quiz (it runs per question). */
+  endsAt: number;
+  scores: Map<string, number>;
+  winners: string[];
+  gems: GemView[];
+  quiz: QuizView | undefined;
 }
 
 export interface HouseStateView {
@@ -193,4 +303,15 @@ export interface HouseStateView {
   players: Map<string, PlayerView>;
   tvOn: boolean;
   viewerCount: number;
+  /** Session id of the Big Brother console ("" when nobody's at the console). */
+  bigBrotherId: string;
+  /** True while Big Brother is talking to the whole house (not during private Diary Room talk). */
+  bigBrotherSpeaking: boolean;
+  /** Housemate in the Diary Room with Big Brother ("" if none). */
+  diaryHousemate: string;
+  diaryBroadcast: boolean;
+  /** The current (or just finished) task; undefined when none. */
+  task: TaskView | undefined;
+  /** Server clock (ms since epoch) at the last patch, to line up countdowns. */
+  serverTime: number;
 }

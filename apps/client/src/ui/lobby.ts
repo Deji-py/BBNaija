@@ -116,6 +116,45 @@ export function showWatchStart(parent: HTMLElement, onStart: (name: string) => P
   });
 }
 
+/** Sign-in for the Big Brother console. The secret is checked by the server. */
+export function showAdminLogin(parent: HTMLElement, onSubmit: (secret: string) => Promise<void>): void {
+  const el = document.createElement("div");
+  el.className = "overlay";
+  el.innerHTML = `
+    <form class="card lobby">
+      <h1>Big Brother console</h1>
+      <p class="muted">Production team only.</p>
+      <label class="field">
+        <span>Admin secret</span>
+        <input name="secret" type="password" required autocomplete="current-password" />
+      </label>
+      <button type="submit">Open console</button>
+      <p class="error" role="alert"></p>
+    </form>
+  `;
+  parent.appendChild(el);
+  const form = el.querySelector("form")!;
+  const input = form.elements.namedItem("secret") as HTMLInputElement;
+  const button = form.querySelector("button")!;
+  const errorEl = form.querySelector<HTMLElement>(".error")!;
+  input.focus();
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    button.disabled = true;
+    button.textContent = "Opening…";
+    errorEl.textContent = "";
+    try {
+      await onSubmit(input.value);
+      el.remove();
+    } catch (err) {
+      errorEl.textContent = describeError(err);
+      input.select();
+      button.disabled = false;
+      button.textContent = "Open console";
+    }
+  });
+}
+
 /** Full-screen message with a button that reloads the page. */
 export function showDisconnected(parent: HTMLElement, message: string): void {
   const el = document.createElement("div");
@@ -134,6 +173,7 @@ export function showDisconnected(parent: HTMLElement, message: string): void {
 
 function describeError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
+  if (/wrong admin secret/i.test(msg)) return "That secret isn't right.";
   if (/full|locked/i.test(msg)) return "The house is full right now. Try again later.";
   if (/fetch|network|connect|ECONNREFUSED/i.test(msg)) return "Can't reach the game server. Is it running?";
   return `Couldn't join: ${msg}`;

@@ -80,6 +80,7 @@ export class PlayersView {
       const pose = buffer.sample(now);
       this.voice?.setSourcePosition(id, { x: pose.x, y: HEAD_HEIGHT, z: pose.z });
       avatar.setVoiceState(state.voice ? voiceIconFor(state) : "none");
+      avatar.setPerks(state.perks ? [...state.perks] : []);
       const pos = avatar.root.position;
       const speed = dt > 0 ? Math.hypot(pose.x - pos.x, pose.z - pos.z) / dt : 0;
       pos.set(pose.x, 0, pose.z);
@@ -103,6 +104,6 @@ export class PlayersView {
   }
 }
 
-export function voiceIconFor(s: { speaking: boolean; muted: boolean }): VoiceIconState {
-  return s.muted ? "muted" : s.speaking ? "speaking" : "none";
+export function voiceIconFor(s: { speaking: boolean; muted: boolean; adminMuted?: boolean }): VoiceIconState {
+  return s.muted || s.adminMuted ? "muted" : s.speaking ? "speaking" : "none";
 }
