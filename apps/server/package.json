@@ -1,0 +1,20 @@
+{
+  "name": "@bbn/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15"
+  },
+  "dependencies": {
+    "@bbn/shared": "workspace:*",
+    "@colyseus/ws-transport": "^0.18.4",
+    "colyseus": "^0.18.9"
+  }
+}

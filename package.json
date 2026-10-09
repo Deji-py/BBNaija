@@ -1,0 +1,17 @@
+{
+  "name": "big-brother-ninja",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.34.6",
+  "scripts": {
+    "dev": "pnpm -r --parallel --stream dev",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}
