@@ -19,6 +19,10 @@ export class FollowCamera {
   yaw = Math.PI; // start behind the player, looking north
   pitch = 0.6;
   distance = 8;
+  /** When false, mouse drag/wheel are ignored (another camera mode owns the mouse). */
+  pointerEnabled = true;
+  /** performance.now() of the last mouse drag — lets an auto-follow camera back off while the user steers. */
+  lastDragAt = -Infinity;
 
   private readonly raycaster = new THREE.Raycaster();
   private readonly focus = new THREE.Vector3();
@@ -65,6 +69,7 @@ export class FollowCamera {
   private bindPointer(dom: HTMLElement): void {
     let dragging = false;
     dom.addEventListener("pointerdown", (e) => {
+      if (!this.pointerEnabled) return;
       dragging = true;
       dom.setPointerCapture(e.pointerId);
     });
@@ -73,12 +78,14 @@ export class FollowCamera {
       dom.releasePointerCapture(e.pointerId);
     });
     dom.addEventListener("pointermove", (e) => {
-      if (!dragging) return;
+      if (!dragging || !this.pointerEnabled) return;
+      this.lastDragAt = performance.now();
       this.rotate(-e.movementX * 0.005, e.movementY * 0.004);
     });
     dom.addEventListener(
       "wheel",
       (e) => {
+        if (!this.pointerEnabled) return;
         e.preventDefault();
         this.distance = THREE.MathUtils.clamp(this.distance + e.deltaY * 0.01, MIN_DISTANCE, MAX_DISTANCE);
       },

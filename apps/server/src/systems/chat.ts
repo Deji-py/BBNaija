@@ -1,13 +1,14 @@
 import { CHAT_HISTORY_SIZE, CHAT_MAX_LENGTH, type ChatMessage } from "@bbn/shared";
+import { RateLimiter } from "./rateLimit.js";
 
-/** Token bucket: up to BURST messages at once, refilling one every REFILL_MS. */
+/** Up to 3 messages at once, then one every 1.5 s. */
 const BURST = 3;
 const REFILL_MS = 1500;
 
-/** Recent house chat plus per-player rate limiting. */
+/** Recent chat plus per-sender rate limiting. Used for house chat and (separately) viewer chat. */
 export class ChatLog {
   private readonly history: ChatMessage[] = [];
-  private readonly buckets = new Map<string, { tokens: number; updatedAt: number }>();
+  private readonly limiter = new RateLimiter(BURST, REFILL_MS);
   private nextId = 1;
 
   /** Cleans up raw input. Returns null if nothing sendable is left. */
@@ -21,15 +22,9 @@ export class ChatLog {
     return Array.from(text).slice(0, CHAT_MAX_LENGTH).join(""); // slice by code point, not UTF-16 unit
   }
 
-  /** True if this player may send now (consumes a token). */
-  allow(playerId: string, now = Date.now()): boolean {
-    const b = this.buckets.get(playerId) ?? { tokens: BURST, updatedAt: now };
-    b.tokens = Math.min(BURST, b.tokens + (now - b.updatedAt) / REFILL_MS);
-    b.updatedAt = now;
-    this.buckets.set(playerId, b);
-    if (b.tokens < 1) return false;
-    b.tokens -= 1;
-    return true;
+  /** True if this sender may send now (consumes a token). */
+  allow(senderId: string): boolean {
+    return this.limiter.allow(senderId);
   }
 
   add(from: { id: string; name: string; color: string }, text: string): ChatMessage {
@@ -43,7 +38,7 @@ export class ChatLog {
     return [...this.history];
   }
 
-  forget(playerId: string): void {
-    this.buckets.delete(playerId);
+  forget(senderId: string): void {
+    this.limiter.forget(senderId);
   }
 }

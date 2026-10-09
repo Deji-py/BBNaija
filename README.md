@@ -14,7 +14,8 @@ The full build specification lives in [SPEC.md](SPEC.md).
 | M2 — Multiplayer sync | ✅ done |
 | M3 — Proximity voice | ✅ done |
 | M4 — Chat, emotes & interactions | ✅ done |
-| M5 — Spectator mode | ⏳ next |
+| M5 — Spectator mode | ✅ done |
+| M6 — Big Brother console, tasks & Diary Room | ⏳ next |
 
 ## Requirements
 
@@ -43,7 +44,23 @@ This starts both apps in parallel:
 
 Open http://localhost:5173, pick a name and colour, and enter the house. Open a second browser window to see two housemates together.
 
-### Testing multiplayer
+### Watching (spectator mode)
+
+Open **http://localhost:5173/watch** and click **Start watching**. Viewers have no avatar — they render the live house from game state (no video stream), so watching is cheap.
+
+| Input | Action |
+|---|---|
+| 1–6 or the camera bar | House cameras: Lounge, Kitchen, Bedroom, Gym, Garden, Diary Room |
+| Click a housemate in the list | Follow them (drag to look around; the camera swings back behind them after 3 s) |
+| 0 | Free camera: WASD fly, drag to look, Q / E down / up, Shift faster |
+| Emoji buttons | Reactions that float up for every viewer |
+| Enter | Viewer chat |
+
+- **Audio follows the camera** — you hear what that spot would hear (voices fade out by 15 m). The first **10** viewers get live audio; in the peer-to-peer MVP every listening viewer adds an upload stream for each housemate, so the cap protects housemates' connections until LiveKit (M9).
+- **The bubble stays intact:** viewer chat, reactions and the viewer list are only ever sent to viewers. Viewers *can* read house chat, as on the real show.
+- Housemates and viewers share one room: up to 8 housemates plus 100 viewers.
+
+
 
 ```bash
 pnpm bots       # 2 bots join the house and wander around (Ctrl+C to stop)
@@ -107,9 +124,9 @@ apps/server      Node + TypeScript + Colyseus authoritative game server
 packages/shared  Types and constants shared by client and server (@bbn/shared)
 ```
 
-Inside `apps/client/src`: `scene/` (renderer, house builder, follow camera), `entities/` (avatar, name tags, voice badges), `net/` (connection, prediction, interpolation), `voice/` (VoiceProvider interface, WebRTC mesh, spatial audio, mic), `input/`, `ui/` (lobby, HUD, voice controls), `modes/` (the game loop per mode).
+Inside `apps/client/src`: `scene/` (renderer, house builder, follow & spectator cameras), `entities/` (avatar, name tags, voice badges), `net/` (connection, prediction, interpolation), `voice/` (VoiceProvider interface, WebRTC mesh, spatial audio, mic), `input/`, `ui/` (lobby, HUD, voice controls), `modes/` (`housemate.ts`, `spectator.ts`, and `playersView.ts` which draws everyone from server state for both).
 
-Inside `apps/server/src`: `rooms/HouseRoom.ts` (the authoritative room), `schema/` (synced state), `systems/` (chat log & rate limiting).
+Inside `apps/server/src`: `rooms/HouseRoom.ts` (the authoritative room), `schema/` (synced state), `systems/` (chat log, rate limiting).
 
 Interactable objects (seats, exit spots, ranges) are defined in `packages/shared/src/interactions.ts`, next to the house layout. `apps/server/scripts/bot.ts` is the bot used by `pnpm bots`.
 

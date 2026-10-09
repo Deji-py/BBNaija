@@ -195,3 +195,20 @@ export const COLLIDERS: readonly Box2D[] = [
 export function areaAt(x: number, z: number): Area | undefined {
   return AREAS.find((a) => x >= a.minX && x < a.maxX && z >= a.minZ && z < a.maxZ);
 }
+
+/** Fixed "house camera" per area for spectators: mounted high in a corner, looking in. */
+export interface HouseCamera {
+  id: AreaId;
+  label: string;
+  position: { x: number; y: number; z: number };
+  target: { x: number; y: number; z: number };
+}
+
+export const HOUSE_CAMERAS: readonly HouseCamera[] = [
+  { id: "lounge", label: "Lounge", position: { x: 14.3, y: 2.8, z: 9.3 }, target: { x: 4, y: 0.8, z: 2 } },
+  { id: "kitchen", label: "Kitchen", position: { x: 1.7, y: 2.8, z: -2.7 }, target: { x: 9, y: 0.8, z: -7 } },
+  { id: "bedroom", label: "Bedroom", position: { x: -5.7, y: 2.8, z: -2.7 }, target: { x: -10.5, y: 0.6, z: -7.5 } },
+  { id: "gym", label: "Gym", position: { x: -5.7, y: 2.8, z: 9.3 }, target: { x: -11, y: 0.8, z: 3 } },
+  { id: "garden", label: "Garden", position: { x: 0, y: 6, z: 25.5 }, target: { x: 0, y: 0, z: 14 } },
+  { id: "diary", label: "Diary Room", position: { x: 0.3, y: 2.4, z: -2.7 }, target: { x: -2, y: 1, z: -8.3 } },
+];

@@ -2,8 +2,16 @@ import { CHAT_MAX_LENGTH, type ChatMessage } from "@bbn/shared";
 
 const VISIBLE_LINES = 50;
 
+export interface ChatPanelOptions {
+  className?: string;
+  placeholder?: string;
+  label?: string;
+  /** Show messages only, with no input (e.g. house chat as seen by viewers). */
+  readOnly?: boolean;
+}
+
 /**
- * House chat panel. Enter opens the input, Enter sends, Esc cancels.
+ * Chat panel. Enter opens the input, Enter sends, Esc cancels.
  * While the input has focus, game keys (WASD, E, V…) are ignored because
  * every key handler checks whether the user is typing.
  */
@@ -13,18 +21,28 @@ export class ChatPanel {
   private readonly input: HTMLInputElement;
   private readonly seen = new Set<number>();
 
-  constructor(parent: HTMLElement, private readonly onSend: (text: string) => void) {
+  constructor(
+    parent: HTMLElement,
+    private readonly onSend: (text: string) => void,
+    options: ChatPanelOptions = {},
+  ) {
     this.el = document.createElement("div");
-    this.el.className = "chat";
+    this.el.className = `chat ${options.className ?? ""}`;
     this.el.innerHTML = `
-      <ol class="chat-list" aria-live="polite" aria-label="House chat"></ol>
+      <ol class="chat-list" aria-live="polite"></ol>
       <form class="chat-form">
-        <input class="chat-input" maxlength="${CHAT_MAX_LENGTH}" placeholder="Press Enter to chat" autocomplete="off" aria-label="Chat message" />
+        <input class="chat-input" maxlength="${CHAT_MAX_LENGTH}" autocomplete="off" aria-label="Chat message" />
       </form>
     `;
     parent.appendChild(this.el);
     this.list = this.el.querySelector(".chat-list")!;
     this.input = this.el.querySelector(".chat-input")!;
+    this.list.setAttribute("aria-label", options.label ?? "House chat");
+    this.input.placeholder = options.placeholder ?? "Press Enter to chat";
+    if (options.readOnly) {
+      this.el.querySelector("form")!.remove();
+      return;
+    }
 
     this.el.querySelector("form")!.addEventListener("submit", (e) => {
       e.preventDefault();

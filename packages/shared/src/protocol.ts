@@ -5,6 +5,13 @@ import type { Activity, EmoteName } from "./interactions.js";
 
 /** Max housemates in one house. P2P voice (M3) gets heavy beyond ~8. */
 export const MAX_HOUSEMATES = 8;
+/** Max spectators per house room for the MVP (one room holds everyone; relay rooms come later). */
+export const MAX_VIEWERS = 100;
+/**
+ * Viewers who get live audio. In the P2P mesh every listening viewer costs each
+ * housemate one more outgoing audio stream, so keep this small until LiveKit (M9).
+ */
+export const MAX_AUDIO_VIEWERS = 10;
 
 export const NAME_MAX_LENGTH = 20;
 
@@ -24,7 +31,9 @@ export const AVATAR_COLORS = [
 export interface JoinOptions {
   name: string;
   color: string;
-  /** True for real browser clients that take part in voice chat (bots leave it off). */
+  /** Housemate (default) or a spectator watching via /watch. */
+  role?: "housemate" | "viewer";
+  /** True for real browser clients that take part in voice chat (bots leave it off). For viewers: listen-only. */
   voice?: boolean;
 }
 
@@ -52,7 +61,32 @@ export const Msg = {
   chat: "chat",
   /** Client → server: request recent chat. Server → client: the recent chat lines. */
   chatHistory: "chat:history",
+  /** Server → housemates: a listen-only voice peer (a viewer) left; close that connection. */
+  voicePeerLeft: "voice:peer-left",
+  /** Server → viewer, right after joining: what this viewer gets. */
+  viewerWelcome: "viewer:welcome",
+  /** Viewer chat — only ever sent to viewers, never to housemates. */
+  viewerChat: "viewer:chat",
+  viewerChatHistory: "viewer:chat-history",
+  /** Viewer → server: an emoji reaction. Server → viewers: someone reacted. */
+  viewerReact: "viewer:react",
 } as const;
+
+export interface ViewerWelcome {
+  /** Whether this viewer got one of the MAX_AUDIO_VIEWERS audio slots. */
+  audio: boolean;
+}
+
+export const REACTIONS = ["❤️", "😂", "😮", "👏", "🔥", "😢"] as const;
+export type Reaction = (typeof REACTIONS)[number];
+
+export interface ReactionMessage {
+  emoji: Reaction;
+}
+
+export interface VoicePeerLeft {
+  id: string;
+}
 
 export interface ActionMessage {
   objectId: string;
@@ -155,6 +189,8 @@ export interface PlayerView {
 }
 
 export interface HouseStateView {
+  /** Housemates only — viewers are never in here. */
   players: Map<string, PlayerView>;
   tvOn: boolean;
+  viewerCount: number;
 }

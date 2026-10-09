@@ -1,4 +1,10 @@
-import { Msg, type VoiceSignalData, type VoiceSignalMessage, type VoiceSignalRelay } from "@bbn/shared";
+import {
+  Msg,
+  type VoicePeerLeft,
+  type VoiceSignalData,
+  type VoiceSignalMessage,
+  type VoiceSignalRelay,
+} from "@bbn/shared";
 import type { HouseRoom } from "../net/connection.js";
 import type { SpatialAudio } from "./spatialAudio.js";
 import type { Vec3, VoiceProvider } from "./VoiceProvider.js";
@@ -22,8 +28,9 @@ interface Peer {
  *
  * Setting up a connection ("signalling") needs a go-between to swap an offer
  * and an answer describing each side's audio and network addresses; that's the
- * Colyseus room. To avoid both sides offering at once, only the player with the
- * smaller session id makes the offer.
+ * Colyseus room. To avoid both sides offering at once, exactly one side offers:
+ * `shouldOffer` decides (between housemates, the smaller session id; a
+ * listen-only viewer always offers, since housemates don't know who's watching).
  *
  * ICE candidates (network addresses) are gathered first and sent inside the
  * offer/answer ("non-trickle"), so each link needs just two messages.
@@ -38,8 +45,12 @@ export class MeshVoiceProvider implements VoiceProvider {
   constructor(
     private readonly room: HouseRoom,
     private readonly audio: SpatialAudio,
+    /** Whether we make the offer to peer `id` (the other side then only answers). */
+    private readonly shouldOffer: (id: string) => boolean,
   ) {
     room.onMessage(Msg.voiceSignal, (relay: VoiceSignalRelay) => void this.handleSignal(relay));
+    // A viewer who was listening to us has gone.
+    room.onMessage(Msg.voicePeerLeft, ({ id }: VoicePeerLeft) => this.removePeer(id));
   }
 
   join(localStream: MediaStream | null): void {
@@ -76,7 +87,7 @@ export class MeshVoiceProvider implements VoiceProvider {
   /** A voice-capable player is in the room (called for everyone already there, and newcomers). */
   addPeer(id: string): void {
     if (!this.active || id === this.room.sessionId || this.peers.has(id)) return;
-    if (this.room.sessionId < id) void this.connect(id);
+    if (this.shouldOffer(id)) void this.connect(id);
     // Otherwise we wait for their offer.
   }
 
@@ -106,7 +117,7 @@ export class MeshVoiceProvider implements VoiceProvider {
       if (pc.connectionState !== "failed" || this.peers.get(id) !== peer) return;
       // Retry from the offering side only, so both ends don't race.
       this.removePeer(id);
-      if (this.room.sessionId < id && peer.retries < MAX_RETRIES) {
+      if (this.shouldOffer(id) && peer.retries < MAX_RETRIES) {
         setTimeout(() => {
           if (this.active && !this.peers.has(id)) void this.connect(id, peer.retries + 1);
         }, RETRY_DELAY_MS);
@@ -118,8 +129,8 @@ export class MeshVoiceProvider implements VoiceProvider {
   /** Offering side. */
   private async connect(id: string, retries = 0): Promise<void> {
     const { pc } = this.createPeer(id, retries);
-    // One audio channel in each direction. Without a mic we still receive.
-    const transceiver = pc.addTransceiver("audio", { direction: "sendrecv" });
+    // One audio channel in each direction; without a mic (or as a viewer) receive only.
+    const transceiver = pc.addTransceiver("audio", { direction: this.localTrack ? "sendrecv" : "recvonly" });
     await transceiver.sender.replaceTrack(this.localTrack);
     await pc.setLocalDescription(await pc.createOffer());
     await waitForIceGathering(pc);

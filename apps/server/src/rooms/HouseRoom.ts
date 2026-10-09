@@ -3,10 +3,13 @@ import {
   AVATAR_COLORS,
   EMOTES,
   INTERACTABLE_BY_ID,
+  MAX_AUDIO_VIEWERS,
   MAX_HOUSEMATES,
+  MAX_VIEWERS,
   MAX_SDP_LENGTH,
   Msg,
   NAME_MAX_LENGTH,
+  REACTIONS,
   SPAWN_POINT,
   TICK_RATE_HZ,
   activityExit,
@@ -18,12 +21,17 @@ import {
   type EmoteName,
   type InputMessage,
   type JoinOptions,
+  type Reaction,
+  type ReactionMessage,
+  type ViewerWelcome,
+  type VoicePeerLeft,
   type VoiceSignalMessage,
   type VoiceSignalRelay,
   type VoiceStateMessage,
 } from "@bbn/shared";
 import { HouseState, Player } from "../schema/HouseState.js";
 import { ChatLog } from "../systems/chat.js";
+import { RateLimiter } from "../systems/rateLimit.js";
 
 /** Inputs a client may have waiting before we start dropping them. */
 const MAX_QUEUED_INPUTS = 10;
@@ -46,6 +54,13 @@ const WALK_GRACE_TICKS = 2;
 /** How long a wave lasts. Dancing continues until you move or emote again. */
 const WAVE_TICKS = Math.round(2.5 * TICK_RATE_HZ);
 
+interface Viewer {
+  name: string;
+  color: string;
+  /** Holds one of the MAX_AUDIO_VIEWERS listen-only voice slots. */
+  audio: boolean;
+}
+
 interface PlayerSim {
   queue: InputMessage[];
   credit: number;
@@ -60,16 +75,22 @@ interface PlayerSim {
  * collision code and broadcasts the resulting positions.
  */
 export class HouseRoom extends Room<{ state: HouseState }> {
-  override maxClients = MAX_HOUSEMATES;
+  // Housemates and viewers share the room; onJoin enforces each limit separately.
+  override maxClients = MAX_HOUSEMATES + MAX_VIEWERS;
   override state = new HouseState();
   override patchRate = 1000 / TICK_RATE_HZ;
   override maxMessagesPerSecond = 60;
 
   private readonly sims = new Map<string, PlayerSim>();
   private readonly chat = new ChatLog();
+  /** Spectators, by session id. Not part of the synced state: housemates never see who's watching. */
+  private readonly viewers = new Map<string, Viewer>();
+  private readonly viewerChat = new ChatLog();
+  private readonly reactionLimiter = new RateLimiter(5, 300);
 
   override onCreate(): void {
     this.state.tvOn = false;
+    this.state.viewerCount = 0;
 
     this.onMessage(Msg.input, (client, message: unknown) => {
       const input = parseInput(message);
@@ -81,12 +102,20 @@ export class HouseRoom extends Room<{ state: HouseState }> {
 
     // WebRTC signalling: the server never touches audio, it just forwards the
     // connection offer/answer between two housemates so they can link up directly.
+    // Allowed links: housemate ↔ housemate, and viewer → housemate (listen-only).
+    // Never viewer ↔ viewer.
     this.onMessage(Msg.voiceSignal, (client, message: unknown) => {
       const signal = parseVoiceSignal(message);
       if (!signal || signal.to === client.sessionId) return;
-      const sender = this.state.players.get(client.sessionId);
       const target = this.clients.getById(signal.to);
-      if (!sender?.voice || !target || !this.state.players.get(signal.to)?.voice) return;
+      if (!target) return;
+      const senderIsHousemate = this.state.players.get(client.sessionId)?.voice === true;
+      const targetIsHousemate = this.state.players.get(signal.to)?.voice === true;
+      const senderIsListener = this.viewers.get(client.sessionId)?.audio === true;
+      const targetIsListener = this.viewers.get(signal.to)?.audio === true;
+      const allowed =
+        (senderIsHousemate && (targetIsHousemate || targetIsListener)) || (senderIsListener && targetIsHousemate);
+      if (!allowed) return;
       const relay: VoiceSignalRelay = { from: client.sessionId, data: signal.data };
       target.send(Msg.voiceSignal, relay);
     });
@@ -129,11 +158,34 @@ export class HouseRoom extends Room<{ state: HouseState }> {
       client.send(Msg.chatHistory, this.chat.recent());
     });
 
+    // --- viewers only ---
+    this.onMessage(Msg.viewerChat, (client, message: unknown) => {
+      const viewer = this.viewers.get(client.sessionId);
+      const text = ChatLog.sanitize((message as { text?: unknown } | null)?.text);
+      if (!viewer || !text || !this.viewerChat.allow(client.sessionId)) return;
+      this.sendToViewers(Msg.viewerChat, this.viewerChat.add({ id: client.sessionId, ...viewer }, text));
+    });
+
+    this.onMessage(Msg.viewerChatHistory, (client) => {
+      if (this.viewers.has(client.sessionId)) client.send(Msg.viewerChatHistory, this.viewerChat.recent());
+    });
+
+    this.onMessage(Msg.viewerReact, (client, message: unknown) => {
+      const emoji = (message as { emoji?: unknown } | null)?.emoji;
+      if (!this.viewers.has(client.sessionId) || !REACTIONS.includes(emoji as Reaction)) return;
+      if (!this.reactionLimiter.allow(client.sessionId)) return;
+      const reaction: ReactionMessage = { emoji: emoji as Reaction };
+      this.sendToViewers(Msg.viewerReact, reaction);
+    });
+
     this.setSimulationInterval(() => this.tick(), 1000 / TICK_RATE_HZ);
     console.log(`[house ${this.roomId}] created`);
   }
 
   override onJoin(client: Client, options: Partial<JoinOptions> = {}): void {
+    if (options.role === "viewer") return this.joinViewer(client, options);
+    if (this.state.players.size >= MAX_HOUSEMATES) throw new Error("The house is full");
+
     const player = new Player();
     player.id = client.sessionId;
     player.name = sanitizeName(options.name);
@@ -163,6 +215,19 @@ export class HouseRoom extends Room<{ state: HouseState }> {
   }
 
   override onLeave(client: Client): void {
+    const viewer = this.viewers.get(client.sessionId);
+    if (viewer) {
+      this.viewers.delete(client.sessionId);
+      this.viewerChat.forget(client.sessionId);
+      this.reactionLimiter.forget(client.sessionId);
+      this.state.viewerCount = this.viewers.size;
+      if (viewer.audio) {
+        const left: VoicePeerLeft = { id: client.sessionId };
+        this.sendToHousemates(Msg.voicePeerLeft, left);
+      }
+      return;
+    }
+
     const player = this.state.players.get(client.sessionId);
     this.state.players.delete(client.sessionId);
     this.sims.delete(client.sessionId);
@@ -172,6 +237,28 @@ export class HouseRoom extends Room<{ state: HouseState }> {
 
   override onDispose(): void {
     console.log(`[house ${this.roomId}] disposed`);
+  }
+
+  private joinViewer(client: Client, options: Partial<JoinOptions>): void {
+    if (this.viewers.size >= MAX_VIEWERS) throw new Error("This house is full of viewers right now");
+    const audioSlotsUsed = [...this.viewers.values()].filter((v) => v.audio).length;
+    const viewer: Viewer = {
+      name: sanitizeName(options.name, `Viewer ${Math.floor(1000 + Math.random() * 9000)}`),
+      color: sanitizeColor(options.color),
+      audio: options.voice === true && audioSlotsUsed < MAX_AUDIO_VIEWERS,
+    };
+    this.viewers.set(client.sessionId, viewer);
+    this.state.viewerCount = this.viewers.size;
+    const welcome: ViewerWelcome = { audio: viewer.audio };
+    client.send(Msg.viewerWelcome, welcome);
+  }
+
+  private sendToViewers(type: string, message: unknown): void {
+    for (const c of this.clients) if (this.viewers.has(c.sessionId)) c.send(type, message);
+  }
+
+  private sendToHousemates(type: string, message: unknown): void {
+    for (const c of this.clients) if (this.state.players.has(c.sessionId)) c.send(type, message);
   }
 
   /**
@@ -307,9 +394,9 @@ function parseVoiceState(message: unknown): VoiceStateMessage | null {
   return { speaking, muted };
 }
 
-function sanitizeName(raw: unknown): string {
+function sanitizeName(raw: unknown, fallback = "Housemate"): string {
   const name = typeof raw === "string" ? raw.replace(/[\p{C}]/gu, "").trim().slice(0, NAME_MAX_LENGTH) : "";
-  return name || "Housemate";
+  return name || fallback;
 }
 
 function sanitizeColor(raw: unknown): string {

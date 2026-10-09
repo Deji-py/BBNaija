@@ -28,6 +28,7 @@ export function showLobby(parent: HTMLElement, onSubmit: (options: JoinOptions) 
       </fieldset>
       <button type="submit">Enter the house</button>
       <p class="error" role="alert"></p>
+      <p class="switch-link">Just here to watch? <a href="/watch">Watch live →</a></p>
     </form>
   `;
   parent.appendChild(el);
@@ -66,6 +67,55 @@ export function showLobby(parent: HTMLElement, onSubmit: (options: JoinOptions) 
   });
 }
 
+/**
+ * Start screen for spectators. Clicking "Start watching" is also the user
+ * gesture browsers require before a page may play audio.
+ */
+export function showWatchStart(parent: HTMLElement, onStart: (name: string) => Promise<void>): void {
+  const el = document.createElement("div");
+  el.className = "overlay";
+  el.innerHTML = `
+    <form class="card lobby">
+      <h1>Watch live</h1>
+      <p class="muted">See and hear the house in real time. Housemates can't see you or your chat.</p>
+      <label class="field">
+        <span>Your name in viewer chat (optional)</span>
+        <input name="name" maxlength="${NAME_MAX_LENGTH}" autocomplete="nickname" placeholder="Viewer" />
+      </label>
+      <button type="submit">Start watching</button>
+      <p class="error" role="alert"></p>
+      <p class="switch-link">Selected as a housemate? <a href="/">Enter the house →</a></p>
+    </form>
+  `;
+  parent.appendChild(el);
+  const form = el.querySelector("form")!;
+  const nameInput = form.elements.namedItem("name") as HTMLInputElement;
+  const button = form.querySelector("button")!;
+  const errorEl = form.querySelector<HTMLElement>(".error")!;
+  nameInput.value = loadSaved().viewerName ?? "";
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = nameInput.value.trim();
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...loadSaved(), viewerName: name }));
+    } catch {
+      // Remembering the name is just a convenience.
+    }
+    button.disabled = true;
+    button.textContent = "Connecting…";
+    errorEl.textContent = "";
+    try {
+      await onStart(name);
+      el.remove();
+    } catch (err) {
+      errorEl.textContent = describeError(err);
+      button.disabled = false;
+      button.textContent = "Start watching";
+    }
+  });
+}
+
 /** Full-screen message with a button that reloads the page. */
 export function showDisconnected(parent: HTMLElement, message: string): void {
   const el = document.createElement("div");
@@ -89,9 +139,9 @@ function describeError(err: unknown): string {
   return `Couldn't join: ${msg}`;
 }
 
-function loadSaved(): Partial<JoinOptions> {
+function loadSaved(): Partial<JoinOptions> & { viewerName?: string } {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as Partial<JoinOptions>;
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as Partial<JoinOptions> & { viewerName?: string };
   } catch {
     return {};
   }
@@ -99,7 +149,7 @@ function loadSaved(): Partial<JoinOptions> {
 
 function save(options: JoinOptions): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(options));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...loadSaved(), ...options }));
   } catch {
     // Storage can be unavailable (private mode); remembering the name is just a convenience.
   }

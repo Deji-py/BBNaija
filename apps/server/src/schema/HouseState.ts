@@ -29,6 +29,7 @@ export const HouseState = schema(
   {
     players: t.map(Player),
     tvOn: t.boolean(),
+    viewerCount: t.uint16(),
   },
   "HouseState",
 );

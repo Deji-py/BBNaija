@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { Callbacks } from "@colyseus/sdk";
 import {
   Msg,
   activityExit,
@@ -15,33 +14,25 @@ import {
 import { setupScene } from "../scene/setupScene.js";
 import { buildHouse } from "../scene/house.js";
 import { FollowCamera } from "../scene/followCamera.js";
-import { Avatar } from "../entities/avatar.js";
+import type { Avatar } from "../entities/avatar.js";
 import { Keyboard, isTyping } from "../input/keyboard.js";
 import { Hud } from "../ui/hud.js";
 import { ChatPanel } from "../ui/chat.js";
 import { showDisconnected } from "../ui/lobby.js";
 import type { HouseRoom } from "../net/connection.js";
 import { LocalPlayerController } from "../net/localPlayer.js";
-import { SnapshotBuffer, lerpAngle } from "../net/interpolation.js";
+import { lerpAngle } from "../net/interpolation.js";
+import { getStateCallbacks } from "../net/stateCallbacks.js";
+import { HEAD_HEIGHT, PlayersView, voiceIconFor } from "./playersView.js";
 import { MeshVoiceProvider } from "../voice/meshVoice.js";
 import { SpatialAudio } from "../voice/spatialAudio.js";
 import { SpeakingDetector, type MicResult } from "../voice/mic.js";
 import { VoiceControls } from "../ui/voiceControls.js";
-import type { VoiceIconState } from "../entities/voiceIcon.js";
 
 const TURN_SPEED = 2.2; // rad/s for Z/C camera turning
 const FACE_TURN_RATE = 14; // how fast the avatar rotates to face its movement direction
 /** Longest frame we simulate in one step. Prevents huge jumps (and wall tunnelling) after a tab stall. */
 const MAX_DT = 0.05;
-/** Height of a housemate's mouth/ears, for positioning voices. */
-const HEAD_HEIGHT = 1.65;
-
-interface RemotePlayer {
-  avatar: Avatar;
-  buffer: SnapshotBuffer;
-  state: PlayerView;
-}
-
 interface LocalPlayer {
   avatar: Avatar;
   controller: LocalPlayerController;
@@ -67,10 +58,14 @@ export function startHousemateMode(container: HTMLElement, room: HouseRoom, audi
   const hud = new Hud(container);
 
   let local: LocalPlayer | null = null;
-  const remotes = new Map<string, RemotePlayer>();
 
   // --- voice ---
-  const voice = new MeshVoiceProvider(room, new SpatialAudio(audioCtx));
+  // Offer to other housemates with a larger session id; viewers always offer to us.
+  const voice = new MeshVoiceProvider(
+    room,
+    new SpatialAudio(audioCtx),
+    (id) => room.state.players.has(id) && room.sessionId < id,
+  );
   const voiceControls = new VoiceControls(container, mic.stream !== null, mic.stream ? undefined : mic.reason);
   const speaking = mic.stream ? new SpeakingDetector(audioCtx, mic.stream) : null;
   voice.join(mic.stream);
@@ -98,46 +93,24 @@ export function startHousemateMode(container: HTMLElement, room: HouseRoom, audi
   });
   room.onMessage(Msg.chat, (msg: ChatMessage) => {
     chat.add(msg);
-    const avatar = msg.fromId === room.sessionId ? local?.avatar : remotes.get(msg.fromId)?.avatar;
+    const avatar = msg.fromId === room.sessionId ? local?.avatar : players.avatarOf(msg.fromId);
     avatar?.showChat(msg.text);
   });
   room.onMessage(Msg.chatHistory, (history: ChatMessage[]) => history.forEach((m) => chat.add(m)));
   room.send(Msg.chatHistory); // ask only after the handler above is registered
 
   // --- react to server state ---
-  const $ = Callbacks.get(room as never) as unknown as StateCallbacks;
-
-  $.onAdd("players", (player, id) => {
-    const avatar = new Avatar(player.name, player.color);
-    avatar.root.position.set(player.x, 0, player.z);
-    avatar.root.rotation.y = player.rotY;
-    scene.add(avatar.root);
-
-    if (id === room.sessionId) {
-      const controller = new LocalPlayerController({ x: player.x, z: player.z }, (input) =>
-        room.send(Msg.input, input),
-      );
-      local = { avatar, controller, state: player };
-      $.onChange(player, () => {
-        const exit = player.activity ? activityExit(player.activity, player.x, player.z) : null;
-        controller.reconcile(player.x, player.z, player.lastSeq, exit);
-      });
-      followCam.update(0, avatar.root.position, true);
-    } else {
-      const remote: RemotePlayer = { avatar, buffer: new SnapshotBuffer(player), state: player };
-      remotes.set(id, remote);
-      $.onChange(player, () => remote.buffer.push(player));
-      if (player.voice) voice.addPeer(id);
-    }
-    hud.setPlayerCount(room.state.players.size);
+  const $ = getStateCallbacks(room);
+  const players = new PlayersView(scene, room, $, voice, (player, avatar) => {
+    const controller = new LocalPlayerController({ x: player.x, z: player.z }, (input) => room.send(Msg.input, input));
+    local = { avatar, controller, state: player };
+    $.onChange(player, () => {
+      const exit = player.activity ? activityExit(player.activity, player.x, player.z) : null;
+      controller.reconcile(player.x, player.z, player.lastSeq, exit);
+    });
+    followCam.update(0, avatar.root.position, true);
   });
-
-  $.onRemove("players", (_player, id) => {
-    voice.removePeer(id);
-    remotes.get(id)?.avatar.dispose();
-    remotes.delete(id);
-    hud.setPlayerCount(room.state.players.size);
-  });
+  players.onCountChange((n) => hud.setPlayerCount(n));
 
   $.listen("tvOn", (on) => house.tv.setOn(on));
 
@@ -185,7 +158,7 @@ export function startHousemateMode(container: HTMLElement, room: HouseRoom, audi
   }
 
   // Dev-only handle for poking at the scene from the browser console.
-  if (import.meta.env.DEV) Object.assign(window, { __bbn: { room, scene, remotes, voice, audioCtx, followCam, getLocal: () => local } });
+  if (import.meta.env.DEV) Object.assign(window, { __bbn: { room, scene, remotes: players.remotes, voice, audioCtx, followCam, getLocal: () => local } });
 
   // --- game loop ---
   const clock = new THREE.Clock();
@@ -223,42 +196,17 @@ export function startHousemateMode(container: HTMLElement, room: HouseRoom, audi
 
       // Our ears follow the avatar, facing where the camera looks.
       voice.setListenerPosition({ x: pos.x, y: HEAD_HEIGHT, z: pos.z }, followCam.yaw);
-      if (sentVoiceState) local.avatar.setVoiceState(iconFor(sentVoiceState));
+      if (sentVoiceState) local.avatar.setVoiceState(voiceIconFor(sentVoiceState));
 
       followCam.update(dt, pos);
       hud.setArea(areaAt(pos.x, pos.z)?.label ?? "Outside");
       updatePrompt(me, pos.x, pos.z);
     }
 
-    const now = performance.now();
-    for (const [id, { avatar, buffer, state }] of remotes) {
-      const pose = buffer.sample(now);
-      voice.setSourcePosition(id, { x: pose.x, y: HEAD_HEIGHT, z: pose.z });
-      avatar.setVoiceState(state.voice ? iconFor(state) : "none");
-      const pos = avatar.root.position;
-      const speed = dt > 0 ? Math.hypot(pose.x - pos.x, pose.z - pos.z) / dt : 0;
-      pos.set(pose.x, 0, pose.z);
-      avatar.root.rotation.y = pose.rotY;
-      avatar.update(dt, speed, state.anim === "walk" || state.anim === "idle" ? undefined : state.anim);
-    }
+    players.update(dt);
 
     house.tv.animate(dt);
     hud.tick(dt);
     renderer.render(scene, camera);
   });
-}
-
-function iconFor(s: { speaking: boolean; muted: boolean }): VoiceIconState {
-  return s.muted ? "muted" : s.speaking ? "speaking" : "none";
-}
-
-/**
- * The slice of the Colyseus callbacks API we use, typed against our shared
- * view types (the client decodes state by reflection and has no schema classes).
- */
-interface StateCallbacks {
-  onAdd(collection: "players", cb: (player: PlayerView, id: string) => void): () => void;
-  onRemove(collection: "players", cb: (player: PlayerView, id: string) => void): () => void;
-  onChange(instance: PlayerView, cb: () => void): () => void;
-  listen(property: "tvOn", cb: (value: boolean) => void): () => void;
 }
