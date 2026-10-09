@@ -64,6 +64,18 @@ export class Avatar {
     });
   }
 
+  /** Frees GPU resources. Materials are shared (see scene/materials.ts) and are kept. */
+  dispose(): void {
+    this.root.removeFromParent();
+    this.root.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.geometry.dispose();
+      if (o instanceof THREE.Sprite) {
+        o.material.map?.dispose();
+        o.material.dispose();
+      }
+    });
+  }
+
   /**
    * @param dt seconds since last frame
    * @param speed current horizontal speed in m/s

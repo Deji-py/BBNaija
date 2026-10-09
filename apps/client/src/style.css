@@ -28,16 +28,6 @@ canvas:active {
   pointer-events: none;
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.6);
 }
-.hud-area {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  padding: 6px 14px;
-  border-radius: 999px;
-  background: rgb(15 15 25 / 0.55);
-  font-weight: 600;
-  font-size: 15px;
-}
 .hud-fps {
   position: absolute;
   top: 16px;
@@ -62,4 +52,129 @@ canvas:active {
     width: calc(100% - 64px);
     text-align: center;
   }
+}
+
+/* --- HUD additions --- */
+.hud-top-left {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hud-pill {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgb(15 15 25 / 0.55);
+  font-weight: 600;
+  font-size: 15px;
+}
+.hud-pill:empty {
+  display: none;
+}
+.hud-count {
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+/* --- Overlays (lobby, disconnected) --- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: radial-gradient(circle at 50% 30%, #2a2340, #12121a 70%);
+  z-index: 10;
+}
+.card {
+  width: min(380px, 100%);
+  box-sizing: border-box;
+  padding: 28px;
+  border-radius: 16px;
+  background: #1d1b29;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
+  text-align: left;
+}
+.card h1,
+.card h2 {
+  margin: 0 0 6px;
+}
+.muted {
+  margin: 0 0 20px;
+  color: #a3a0b8;
+}
+.field {
+  display: block;
+  margin: 0 0 18px;
+  padding: 0;
+  border: 0;
+}
+.field > span,
+.field > legend {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #a3a0b8;
+}
+.field input[name="name"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid #3a3650;
+  border-radius: 8px;
+  background: #12111b;
+  color: #fff;
+  font-size: 16px;
+}
+.field input[name="name"]:focus {
+  outline: 2px solid #7b6cf6;
+  outline-offset: 1px;
+}
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--c);
+  cursor: pointer;
+  box-shadow: 0 0 0 2px #1d1b29, 0 0 0 3px transparent;
+}
+.swatch:has(input:checked) {
+  box-shadow: 0 0 0 2px #1d1b29, 0 0 0 4px #fff;
+}
+.swatch:has(input:focus-visible) {
+  outline: 2px solid #7b6cf6;
+  outline-offset: 4px;
+}
+.swatch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.card button {
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #7b6cf6;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.card button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.error {
+  min-height: 1.2em;
+  margin: 12px 0 0;
+  color: #ff7b7b;
+  font-size: 14px;
 }

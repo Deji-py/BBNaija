@@ -1,6 +1,7 @@
-/** Minimal HTML overlay: current area, FPS and a controls hint. */
+/** Minimal HTML overlay: current area, player count, FPS and a controls hint. */
 export class Hud {
   private readonly areaEl: HTMLElement;
+  private readonly countEl: HTMLElement;
   private readonly fpsEl: HTMLElement;
   private frames = 0;
   private elapsed = 0;
@@ -10,13 +11,21 @@ export class Hud {
     const el = document.createElement("div");
     el.className = "hud";
     el.innerHTML = `
-      <div class="hud-area"></div>
+      <div class="hud-top-left">
+        <div class="hud-pill hud-area"></div>
+        <div class="hud-pill hud-count"></div>
+      </div>
       <div class="hud-fps"></div>
       <div class="hud-help">WASD / arrows to move · drag to look · Q / E to turn · scroll to zoom</div>
     `;
     parent.appendChild(el);
     this.areaEl = el.querySelector(".hud-area")!;
     this.fpsEl = el.querySelector(".hud-fps")!;
+    this.countEl = el.querySelector(".hud-count")!;
+  }
+
+  setPlayerCount(count: number): void {
+    this.countEl.textContent = `${count} in the house`;
   }
 
   setArea(label: string): void {

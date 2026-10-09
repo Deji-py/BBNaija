@@ -1,10 +1,11 @@
 import { startHousemateMode } from "./modes/housemate.js";
+import { joinHouse } from "./net/connection.js";
+import { showLobby } from "./ui/lobby.js";
 import "./style.css";
 
-// M1: solo mode. The lobby (name + colour picker) arrives with multiplayer in M2;
-// until then `?name=` and `?color=` in the URL override the defaults.
-const params = new URLSearchParams(location.search);
-const name = params.get("name")?.slice(0, 20) || "Housemate";
-const color = params.get("color") ? `#${params.get("color")!.replace(/^#/, "")}` : "#e4572e";
+const app = document.querySelector<HTMLElement>("#app")!;
 
-startHousemateMode(document.querySelector<HTMLElement>("#app")!, name, color);
+showLobby(app, async (options) => {
+  const room = await joinHouse(options);
+  startHousemateMode(app, room);
+});

@@ -11,7 +11,8 @@ The full build specification lives in [SPEC.md](SPEC.md).
 |---|---|
 | M0 — Project setup | ✅ done |
 | M1 — Solo house & character | ✅ done |
-| M2 — Multiplayer sync | ⏳ next |
+| M2 — Multiplayer sync | ✅ done |
+| M3 — Proximity voice | ⏳ next |
 
 ## Requirements
 
@@ -38,7 +39,16 @@ This starts both apps in parallel:
 | Client (Vite) | http://localhost:5173 |
 | Game server (Colyseus) | ws://localhost:2567 — health check at http://localhost:2567/health |
 
-Open http://localhost:5173 to walk around the house (solo until M2).
+Open http://localhost:5173, pick a name and colour, and enter the house. Open a second browser window to see two housemates together.
+
+### Testing multiplayer
+
+```bash
+pnpm bots       # 2 bots join the house and wander around (Ctrl+C to stop)
+pnpm bots 5     # any number up to the 8-housemate limit
+```
+
+**Another machine on the same Wi-Fi:** `pnpm dev` prints a `Network:` URL (e.g. `http://192.168.1.20:5173`). Open it on the other machine — the client connects to the game server on the same host, port 2567. If it can't connect, allow incoming connections for `node` in macOS System Settings → Network → Firewall.
 
 ### Controls
 
@@ -49,7 +59,7 @@ Open http://localhost:5173 to walk around the house (solo until M2).
 | Q / E | Turn the camera left / right |
 | Mouse wheel | Zoom |
 
-Optional URL params: `?name=Ada&color=3fa7d6` sets the name tag and shirt colour (hex without `#`).
+
 
 Other scripts:
 
@@ -65,7 +75,16 @@ apps/server      Node + TypeScript + Colyseus authoritative game server
 packages/shared  Types and constants shared by client and server (@bbn/shared)
 ```
 
-Inside `apps/client/src`: `scene/` (renderer, house builder, follow camera), `entities/` (avatar, name tags), `input/`, `ui/` (HUD), `modes/` (the game loop per mode).
+Inside `apps/client/src`: `scene/` (renderer, house builder, follow camera), `entities/` (avatar, name tags), `net/` (connection, prediction, interpolation), `input/`, `ui/` (lobby, HUD), `modes/` (the game loop per mode).
+
+Inside `apps/server/src`: `rooms/HouseRoom.ts` (the authoritative room), `schema/` (synced state). `apps/server/scripts/bot.ts` is the bot used by `pnpm bots`.
+
+### How multiplayer works
+
+- **Authoritative server.** Clients only send inputs (`{ seq, dx, dz }`, one per 50 ms step while moving). The server applies them with the shared collision code at 20 Hz and broadcasts positions. A modified client can't teleport or speed up: each player gets one step per tick (with a small burst allowance).
+- **Jitter buffer.** Inputs arrive unevenly; the server applies one per tick and only doubles up when a backlog builds, so nobody stutters for everyone else.
+- **Client-side prediction** for your own avatar: it moves the instant you press a key; when the server's position arrives, the client re-applies any inputs the server hasn't processed yet. Same code on both sides → corrections are normally zero.
+- **Interpolation** for everyone else: remote avatars are drawn 100 ms in the past, blending between the two server snapshots around that time.
 
 The house layout (`packages/shared/src/house.ts`) and the collision/movement code (`packages/shared/src/movement.ts`) live in the shared package so the server can run the exact same rules once it becomes authoritative in M2.
 

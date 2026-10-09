@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "pnpm -r --parallel --stream dev",
     "typecheck": "pnpm -r typecheck",
-    "build": "pnpm -r build"
+    "build": "pnpm -r build",
+    "bots": "pnpm --filter @bbn/server bots"
   },
   "engines": {
     "node": ">=20"

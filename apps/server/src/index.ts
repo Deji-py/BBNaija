@@ -1,5 +1,6 @@
-import { createEndpoint, createRouter, defineServer } from "colyseus";
-import { SERVER_PORT, type HealthResponse } from "@bbn/shared";
+import { createEndpoint, createRouter, defineRoom, defineServer } from "colyseus";
+import { HOUSE_ROOM, SERVER_PORT, type HealthResponse } from "@bbn/shared";
+import { HouseRoom } from "./rooms/HouseRoom.js";
 
 const port = Number(process.env.GAME_SERVER_PORT ?? SERVER_PORT);
 const startedAt = Date.now();
@@ -18,8 +19,9 @@ const routes = createRouter({
 });
 
 const gameServer = defineServer({
-  // Rooms are registered here from M2 onwards (e.g. { [HOUSE_ROOM]: defineRoom(HouseRoom) }).
-  rooms: {},
+  rooms: {
+    [HOUSE_ROOM]: defineRoom(HouseRoom),
+  },
   routes,
 });
 
