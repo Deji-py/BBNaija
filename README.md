@@ -59,5 +59,5 @@ packages/shared  Types and constants shared by client and server (@bbn/shared)
 
 | Variable | Where | Default | Purpose |
 |---|---|---|---|
-| `PORT` | server | `2567` | Port the game server listens on |
+| `GAME_SERVER_PORT` | server | `2567` | Port the game server listens on |
 | `VITE_SERVER_URL` | client | `http://<page host>:2567` | Override the game server URL |

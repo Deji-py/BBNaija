@@ -1,7 +1,7 @@
 import { createEndpoint, createRouter, defineServer } from "colyseus";
 import { SERVER_PORT, type HealthResponse } from "@bbn/shared";
 
-const port = Number(process.env.PORT ?? SERVER_PORT);
+const port = Number(process.env.GAME_SERVER_PORT ?? SERVER_PORT);
 const startedAt = Date.now();
 
 // Small HTTP endpoints. Colyseus serves these on the same port as the
