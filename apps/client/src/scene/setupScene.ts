@@ -4,6 +4,9 @@ export interface SceneContext {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
+  /** The sun and sky fill light, driven by the house clock (see dayNight.ts). */
+  sun: THREE.DirectionalLight;
+  hemi: THREE.HemisphereLight;
 }
 
 /** Creates the renderer, scene, camera and lights, and keeps them sized to the window. */
@@ -22,7 +25,8 @@ export function setupScene(container: HTMLElement): SceneContext {
   const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
 
   // Soft sky/ground fill light so shadowed areas are never pitch black.
-  scene.add(new THREE.HemisphereLight(0xdfefff, 0x6b5a45, 1.4));
+  const hemi = new THREE.HemisphereLight(0xdfefff, 0x6b5a45, 1.4);
+  scene.add(hemi);
 
   // The "sun". One shadow-casting light covering the whole house.
   const sun = new THREE.DirectionalLight(0xfff1dc, 2.2);
@@ -46,5 +50,5 @@ export function setupScene(container: HTMLElement): SceneContext {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  return { renderer, scene, camera };
+  return { renderer, scene, camera, sun, hemi };
 }

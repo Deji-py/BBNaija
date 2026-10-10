@@ -1,9 +1,10 @@
 import {
+  COLLIDERS,
   INPUT_STEP_SEC,
-  WALK_SPEED,
   applyInputStep,
-  moveWithCollision,
+  type Box2D,
   type InputMessage,
+  type MoveMode,
   type Vec2,
 } from "@bbn/shared";
 
@@ -36,6 +37,9 @@ export class LocalPlayerController {
   constructor(
     start: Vec2,
     private readonly send: (input: InputMessage) => void,
+    private readonly colliders: () => readonly Box2D[] = () => COLLIDERS,
+    /** Walking, running (Shift) or swimming, decided by the caller each step. */
+    private readonly mode: () => MoveMode = () => "walk",
   ) {
     this.predicted = { ...start };
   }
@@ -53,9 +57,11 @@ export class LocalPlayerController {
       this.step();
     }
     if (dx === 0 && dz === 0) return { ...this.predicted };
-    const partial = WALK_SPEED * this.accumulator;
+    // Draw the partial step since the last input, at this mode's speed.
+    const fraction = this.accumulator / INPUT_STEP_SEC;
     const base = this.exit ?? this.predicted; // about to stand up: draw from where we'll stand
-    return moveWithCollision(base, dx * partial, dz * partial);
+    const mode = this.mode();
+    return applyInputStep(base, dx * fraction, dz * fraction, this.colliders(), mode);
   }
 
   /**
@@ -71,7 +77,7 @@ export class LocalPlayerController {
         pos = pendingExit;
         pendingExit = null;
       }
-      pos = applyInputStep(pos, input.dx, input.dz);
+      pos = applyInputStep(pos, input.dx, input.dz, this.colliders(), this.modeFor(input));
     }
     this.predicted = pos;
     this.exit = pendingExit;
@@ -80,13 +86,21 @@ export class LocalPlayerController {
   private step(): void {
     const { dx, dz } = this.dir;
     if (dx === 0 && dz === 0) return; // standing still: nothing to send
-    const input: InputMessage = { seq: ++this.seq, dx, dz };
+    const mode = this.mode();
+    const input: InputMessage = mode === "run" ? { seq: ++this.seq, dx, dz, run: true } : { seq: ++this.seq, dx, dz };
     this.pending.push(input);
     if (this.exit) {
       this.predicted = this.exit;
       this.exit = null;
     }
-    this.predicted = applyInputStep(this.predicted, dx, dz);
+    this.predicted = applyInputStep(this.predicted, dx, dz, this.colliders(), mode);
     this.send(input);
+  }
+
+  /** Mode to replay a pending input with: swimming is a state we're in, running was chosen per input. */
+  private modeFor(input: InputMessage): MoveMode {
+    const now = this.mode();
+    if (now === "swim") return "swim";
+    return input.run ? "run" : "walk";
   }
 }

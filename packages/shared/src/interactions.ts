@@ -1,11 +1,60 @@
-import { FURNITURE, PLAYER_RADIUS, type Furniture } from "./house.js";
+import { AREAS, DOORS, FURNITURE, LIGHT_SWITCHES, PLAYER_RADIUS, doorBox, doorById, type Furniture } from "./house.js";
 import type { Vec2 } from "./movement.js";
 
 /** Things a housemate can be doing with an object. Each has its own animation. */
-export type Activity = "sit" | "sleep" | "cook" | "workout" | "swim";
+export type Activity = "sit" | "sleep" | "cook" | "workout" | "swim" | "drink" | "eat" | "toilet" | "shower" | "bath" | "wash" | "laundry";
 
-export type EmoteName = "wave" | "dance";
-export const EMOTES: readonly EmoteName[] = ["wave", "dance"];
+/** Emotes from the emote wheel (hold Q). 1 and 2 are shortcuts for wave and dance. */
+export const EMOTES = [
+  "wave",
+  "dance",
+  "clap",
+  "laugh",
+  "cry",
+  "facepalm",
+  "shrug",
+  "point",
+  "thumbsUp",
+  "bow",
+  "salute",
+  "cheer",
+  "think",
+  "sulk",
+  "flex",
+  "blowKiss",
+  "nod",
+  "shakeHead",
+  "sitFloor",
+  "lieDown",
+] as const;
+export type EmoteName = (typeof EMOTES)[number];
+
+/** Emotes that last until you move (the rest play for a couple of seconds). */
+export const LOOPING_EMOTES: ReadonlySet<EmoteName> = new Set(["dance", "sitFloor", "lieDown"]);
+
+/** Wheel labels and icons. */
+export const EMOTE_INFO: Readonly<Record<EmoteName, { label: string; icon: string }>> = {
+  wave: { label: "Wave", icon: "👋" },
+  dance: { label: "Dance", icon: "💃" },
+  clap: { label: "Clap", icon: "👏" },
+  laugh: { label: "Laugh", icon: "😂" },
+  cry: { label: "Cry", icon: "😭" },
+  facepalm: { label: "Facepalm", icon: "🤦" },
+  shrug: { label: "Shrug", icon: "🤷" },
+  point: { label: "Point", icon: "👉" },
+  thumbsUp: { label: "Thumbs up", icon: "👍" },
+  bow: { label: "Bow", icon: "🙇" },
+  salute: { label: "Salute", icon: "🫡" },
+  cheer: { label: "Cheer", icon: "🙌" },
+  think: { label: "Think", icon: "🤔" },
+  sulk: { label: "Sulk", icon: "😒" },
+  flex: { label: "Flex", icon: "💪" },
+  blowKiss: { label: "Blow a kiss", icon: "😘" },
+  nod: { label: "Nod", icon: "🙂" },
+  shakeHead: { label: "Shake head", icon: "🙅" },
+  sitFloor: { label: "Sit on the floor", icon: "🧘" },
+  lieDown: { label: "Lie down", icon: "🛌" },
+};
 
 /** Where a player is placed while using an object, and where they stand when they get up. */
 export interface Slot {
@@ -45,12 +94,24 @@ export interface ToggleInteractable extends InteractableBase {
   promptOff: string;
 }
 
+/** A door. Shut, it blocks the doorway; open, people walk through. */
+export interface DoorInteractable extends InteractableBase {
+  kind: "door";
+  promptOff: string;
+}
+
+/** A room's light switch. Toggles that room's lights for everyone. */
+export interface LightInteractable extends InteractableBase {
+  kind: "light";
+  promptOff: string;
+}
+
 /** Only usable during a task (e.g. the fridge and counter in the cooking challenge). */
 export interface TaskInteractable extends InteractableBase {
   kind: "task";
 }
 
-export type Interactable = SlotInteractable | PoolInteractable | ToggleInteractable | TaskInteractable;
+export type Interactable = SlotInteractable | PoolInteractable | ToggleInteractable | DoorInteractable | TaskInteractable | LightInteractable;
 
 const EAST = Math.PI / 2;
 const NORTH = Math.PI;
@@ -105,8 +166,144 @@ export const INTERACTABLES: readonly Interactable[] = [
   bed("bed-3", -6.6),
   treadmill("treadmill-1", -13),
   treadmill("treadmill-2", -11),
+  {
+    id: "drinks",
+    prompt: "Pour a drink",
+    range: 1.6,
+    kind: "slots",
+    activity: "drink",
+    slots: [11.15, 11.85].map((x) => ({ x, z: 5.55, rotY: NORTH, exitX: x, exitZ: 6.3 })),
+  },
+  {
+    id: "chopping-board",
+    prompt: "Chop the vegetables",
+    range: 1.2,
+    kind: "slots",
+    activity: "cook",
+    slots: [{ x: 5.4, z: -8.35, rotY: NORTH, exitX: 5.4, exitZ: -7.6 }],
+  },
+  {
+    id: "chair-1",
+    prompt: "Sit down and eat",
+    range: 1.1,
+    kind: "slots",
+    activity: "eat",
+    slots: [{ x: 7.2, z: -4.15, rotY: NORTH, exitX: 7.2, exitZ: -3.35 }],
+  },
+  {
+    id: "chair-2",
+    prompt: "Sit down and eat",
+    range: 1.1,
+    kind: "slots",
+    activity: "eat",
+    slots: [{ x: 8.8, z: -4.15, rotY: NORTH, exitX: 8.8, exitZ: -3.35 }],
+  },
+  {
+    id: "chair-3",
+    prompt: "Sit down and eat",
+    range: 1.1,
+    kind: "slots",
+    activity: "eat",
+    slots: [{ x: 7.2, z: -6.85, rotY: SOUTH, exitX: 7.2, exitZ: -7.65 }],
+  },
+  {
+    id: "chair-4",
+    prompt: "Sit down and eat",
+    range: 1.1,
+    kind: "slots",
+    activity: "eat",
+    slots: [{ x: 8.8, z: -6.85, rotY: SOUTH, exitX: 8.8, exitZ: -7.65 }],
+  },
+  {
+    id: "armchair-1",
+    prompt: "Sit in the armchair",
+    range: 1.1,
+    kind: "slots",
+    activity: "sit",
+    slots: [{ x: 11.5, z: 1.25, rotY: SOUTH, exitX: 11.5, exitZ: 2.05 }],
+  },
+  {
+    id: "armchair-2",
+    prompt: "Sit in the armchair",
+    range: 1.1,
+    kind: "slots",
+    activity: "sit",
+    slots: [{ x: 11.5, z: 7.2, rotY: NORTH, exitX: 11.5, exitZ: 6.4 }],
+  },
+  {
+    id: "armchair-3",
+    prompt: "Sit in the armchair",
+    range: 1.1,
+    kind: "slots",
+    activity: "sit",
+    slots: [{ x: -3.8, z: 6.6, rotY: EAST, exitX: -3.0, exitZ: 6.6 }],
+  },
+  // Bathroom and laundry
+  ...[4.2, 6.2].map(
+    (x, i): SlotInteractable => ({
+      id: `toilet-${i + 1}`,
+      prompt: "Use the toilet",
+      range: 1.35,
+      kind: "slots",
+      activity: "toilet",
+      slots: [{ x, z: -15.2, rotY: SOUTH, exitX: x, exitZ: -14.3 }],
+    }),
+  ),
+  ...[8.3, 9.9].map(
+    (x, i): SlotInteractable => ({
+      id: `shower-${i + 1}`,
+      prompt: "Take a shower",
+      range: 1.0,
+      kind: "slots",
+      activity: "shower",
+      slots: [{ x, z: -15.1, rotY: SOUTH, exitX: x, exitZ: -13.95 }],
+    }),
+  ),
+  {
+    id: "bathtub",
+    prompt: "Have a bath",
+    range: 1.1,
+    kind: "slots",
+    activity: "bath",
+    slots: [{ x: 13.25, z: -15.3, rotY: EAST, exitX: 13.6, exitZ: -14.35 }],
+  },
+  ...[5.2, 6.5, 7.8].map(
+    (x, i): SlotInteractable => ({
+      id: `sink-${i + 1}`,
+      prompt: "Wash your hands and face",
+      range: 1.0,
+      kind: "slots",
+      activity: "wash",
+      slots: [{ x, z: -11.15, rotY: NORTH, exitX: x, exitZ: -11.15 }],
+    }),
+  ),
+  ...[-11.2, -12.1].map(
+    (z, i): SlotInteractable => ({
+      id: `washer-${i + 1}`,
+      prompt: "Do your laundry",
+      range: 1.1,
+      kind: "slots",
+      activity: "laundry",
+      slots: [{ x: 13.7, z, rotY: EAST, exitX: 13.7, exitZ: z }],
+    }),
+  ),
   { id: "pool", prompt: "Swim in the pool", range: 1.0, kind: "pool", activity: "swim", capacity: 6 },
-  { id: "tv", prompt: "Turn the TV on", promptOff: "Turn the TV off", range: 3, kind: "toggle" },
+  { id: "tv", prompt: "Turn the TV on", promptOff: "Turn the TV off", range: 1.8, kind: "toggle" },
+  ...DOORS.map(
+    (door): DoorInteractable => ({
+      id: door.id,
+      prompt: `Open the ${door.label}`,
+      promptOff: `Close the ${door.label}`,
+      range: 1.5,
+      kind: "door",
+    }),
+  ),
+  ...LIGHT_SWITCHES.map((sw): LightInteractable => {
+    const room = AREAS.find((a) => a.id === sw.area)?.label ?? sw.area;
+    return { id: `light-${sw.area}`, prompt: `Turn the ${room} lights on`, promptOff: `Turn the ${room} lights off`, range: 1.2, kind: "light" };
+  }),
+  { id: "dj-booth", prompt: "Start the party 🎉", promptOff: "Stop the party", range: 1.6, kind: "toggle" },
+  { id: "home-theater", prompt: "Turn the sound bar on", promptOff: "Turn the sound bar off", range: 1.8, kind: "toggle" },
   // Cooking challenge steps.
   { id: "fridge", prompt: "Grab ingredients", range: 1.2, kind: "task" },
   { id: "counter", prompt: "Prep the ingredients", range: 1.2, kind: "task" },
@@ -119,9 +316,16 @@ const FURNITURE_BY_ID: ReadonlyMap<string, Furniture> = new Map(FURNITURE.map((f
 /** Distance from a point to an object's footprint (0 if inside). */
 export function distanceToObject(id: string, x: number, z: number): number {
   const f = FURNITURE_BY_ID.get(id);
-  if (!f) return Infinity;
-  const dx = Math.max(f.x - f.w / 2 - x, 0, x - (f.x + f.w / 2));
-  const dz = Math.max(f.z - f.d / 2 - z, 0, z - (f.z + f.d / 2));
+  if (f) {
+    const dx = Math.max(f.x - f.w / 2 - x, 0, x - (f.x + f.w / 2));
+    const dz = Math.max(f.z - f.d / 2 - z, 0, z - (f.z + f.d / 2));
+    return Math.hypot(dx, dz);
+  }
+  const door = doorById(id);
+  if (!door) return Infinity;
+  const b = doorBox(door);
+  const dx = Math.max(b.minX - x, 0, x - b.maxX);
+  const dz = Math.max(b.minZ - z, 0, z - b.maxZ);
   return Math.hypot(dx, dz);
 }
 
@@ -148,7 +352,7 @@ const POOL_INSET = 0.8;
 const MIN_SWIMMER_GAP = 1;
 
 /** Pool interior where swimmers float: the pool rectangle shrunk by POOL_INSET. */
-function poolInterior() {
+export function poolInterior() {
   const p = FURNITURE_BY_ID.get("pool")!;
   return {
     minX: p.x - p.w / 2 + POOL_INSET,
@@ -194,7 +398,7 @@ export function chooseSlot(it: SlotInteractable | PoolInteractable, from: Vec2, 
  */
 export function activityExit(id: string, x: number, z: number): Vec2 | null {
   const it = INTERACTABLE_BY_ID.get(id);
-  if (!it || it.kind === "toggle" || it.kind === "task") return null;
+  if (!it || it.kind === "toggle" || it.kind === "task" || it.kind === "door" || it.kind === "light") return null;
   if (it.kind === "slots") {
     const slot = it.slots.find((s) => Math.hypot(s.x - x, s.z - z) < 0.1) ?? it.slots[0]!;
     return { x: slot.exitX, z: slot.exitZ };

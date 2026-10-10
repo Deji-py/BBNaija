@@ -11,11 +11,11 @@ import {
 
 export function parseInput(message: unknown): InputMessage | null {
   if (typeof message !== "object" || message === null) return null;
-  const { seq, dx, dz } = message as Record<string, unknown>;
+  const { seq, dx, dz, run } = message as Record<string, unknown>;
   if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0) return null;
   if (typeof dx !== "number" || typeof dz !== "number") return null;
   if (!Number.isFinite(dx) || !Number.isFinite(dz)) return null;
-  return { seq, dx, dz };
+  return run === true ? { seq, dx, dz, run: true } : { seq, dx, dz };
 }
 
 export function parseVoiceSignal(message: unknown): VoiceSignalMessage | null {

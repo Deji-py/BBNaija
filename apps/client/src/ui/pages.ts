@@ -1,5 +1,6 @@
-import { LIMITS, type ApplicationInput, type MeResponse, type PublicSeason } from "@bbn/shared";
+import { LIMITS, type ApplicationInput, type ApplicationView, type MeResponse, type PublicSeason } from "@bbn/shared";
 import { api, ApiError } from "../net/api.js";
+import { HouseGrid, applicationCards } from "./houseGrid.js";
 
 /**
  * Plain HTML pages around the 3D house: landing, sign-in, the sign-in link
@@ -22,8 +23,7 @@ function page(parent: HTMLElement, me: MeResponse | null): HTMLElement {
     <header class="site-header">
       <a class="brand" href="/">Big Brother <span>Ninja</span></a>
       <nav>
-        <a href="/watch">Watch live</a>
-        <a href="/apply">Apply</a>
+        <a href="/">Live houses</a>
         <span class="who"></span>
       </nav>
     </header>
@@ -85,58 +85,96 @@ function seasonLine(s: PublicSeason): string {
 
 // ------------------------------------------------------------------ landing
 
+const GRID_REFRESH_MS = 5000;
+
+/** Home: a Twitch-style grid of live houses, seasons taking applications, and your own status. */
 export async function showLanding(parent: HTMLElement): Promise<void> {
-  const [me, season] = await Promise.all([api.me(), api.season()]);
+  const [me, houses] = await Promise.all([api.me(), api.houses()]);
   const main = page(parent, me);
+  main.classList.add("wide");
 
-  const hero = document.createElement("section");
-  hero.className = "hero";
-  hero.innerHTML = `
-    <h1>A live virtual house.<br />Real people. Real drama.</h1>
-    <p>Selected housemates live together in a 3D house — talking, cooking, plotting — while everyone else watches live, picks favourites and votes.</p>
-    <div class="actions"></div>
-  `;
-  const actions = hero.querySelector(".actions")!;
-  main.append(hero);
+  if (me) main.append(...myStatusCards(me));
 
-  if (!season) {
-    actions.append(linkButton("/watch", "Watch the house"));
-    main.append(para("The next season hasn't opened for applications yet. Check back soon!", "muted center"));
-    return;
-  }
+  const liveHead = document.createElement("h2");
+  liveHead.className = "section-title";
+  liveHead.innerHTML = `<span class="live-dot"></span> Live houses`;
+  main.append(liveHead);
+  const grid = new HouseGrid(main);
+  grid.set(houses.live);
 
-  const status = document.createElement("p");
-  status.className = "season-status";
-  if (season.status === "applications") {
-    status.textContent = `🎟️ Applications are open for ${season.name} — ${seasonLine(season)}.`;
-    actions.append(linkButton("/apply", "Apply now"), linkButton("/watch", "Watch the house", true));
-  } else {
-    status.textContent = `🔴 ${season.name} is live now.`;
-    if (me?.canEnterHouse) actions.append(linkButton("/house", "Enter the house"));
-    actions.append(linkButton("/watch", "Watch live", !!me?.canEnterHouse));
-  }
-  hero.insertBefore(status, actions);
+  const appsSection = document.createElement("section");
+  main.append(appsSection);
+  const renderApps = (seasons: PublicSeason[]) => {
+    appsSection.replaceChildren();
+    if (!seasons.length) return;
+    const h = document.createElement("h2");
+    h.className = "section-title";
+    h.textContent = "🎟️ Taking applications";
+    appsSection.append(h, applicationCards(seasons));
+  };
+  renderApps(houses.applications);
 
-  if (me?.application) main.append(applicationStatusCard(me));
+  const about = document.createElement("p");
+  about.className = "muted center about";
+  about.textContent =
+    "Selected housemates live together in a 3D house — talking, cooking, plotting — while everyone else watches live, picks favourites and votes.";
+  main.append(about);
+
+  // Keep the grid live: viewer counts, who's where, what's happening.
+  const timer = setInterval(async () => {
+    try {
+      const next = await api.houses();
+      grid.set(next.live);
+      renderApps(next.applications);
+    } catch {
+      // Server blip: keep showing the last data.
+    }
+  }, GRID_REFRESH_MS);
+  window.addEventListener("pagehide", () => {
+    clearInterval(timer);
+    grid.dispose();
+  });
 }
 
-function applicationStatusCard(me: MeResponse): HTMLElement {
-  const c = document.createElement("section");
-  c.className = "card page-card";
-  const h = document.createElement("h2");
-  h.textContent = "Your application";
-  const app = me.application!;
-  const text =
-    app.status === "pending"
-      ? `Thanks, ${app.displayName}! Big Brother is reviewing applications for ${me.season?.name ?? "this season"}.`
-      : app.status === "selected"
-        ? me.canEnterHouse
-          ? `You're a housemate! The house is open — go on in.`
-          : `You've been selected as a housemate for ${me.season?.name ?? "the season"}! You can enter once the season goes live.`
-        : `Thanks for applying. You weren't selected this time.`;
-  c.append(h, para(text));
-  if (me.canEnterHouse) c.append(linkButton("/house", "Enter the house"));
-  return c;
+/** Your applications, houses you can enter, and houses you host. */
+function myStatusCards(me: MeResponse): HTMLElement[] {
+  const out: HTMLElement[] = [];
+  if (me.canEnter.length) {
+    const c = document.createElement("section");
+    c.className = "card page-card highlight";
+    const h = document.createElement("h2");
+    h.textContent = "You're a housemate! 🎉";
+    c.append(h);
+    for (const s of me.canEnter) c.append(linkButton(`/house/${encodeURIComponent(s.id)}`, `Enter ${s.name}`));
+    out.push(c);
+  }
+  if (me.hosting.length) {
+    const c = document.createElement("section");
+    c.className = "card page-card";
+    const h = document.createElement("h2");
+    h.textContent = "Houses you host";
+    c.append(h, para(me.hosting.map((s) => `${s.name} (${s.status})`).join(" · ")), linkButton("/bigbrother", "Open the Big Brother console"));
+    out.push(c);
+  }
+  const pending = me.applications.filter((a) => !me.canEnter.some((s) => s.id === a.season.id));
+  if (pending.length) {
+    const c = document.createElement("section");
+    c.className = "card page-card";
+    const h = document.createElement("h2");
+    h.textContent = "Your applications";
+    c.append(h);
+    for (const { season, application } of pending) c.append(para(applicationLine(season, application)));
+    out.push(c);
+  }
+  return out;
+}
+
+function applicationLine(season: PublicSeason, app: ApplicationView): string {
+  if (app.status === "pending") return `${season.name}: Big Brother is reviewing your application.`;
+  if (app.status === "rejected") return `${season.name}: thanks for applying — you weren't selected this time.`;
+  return season.status === "ended"
+    ? `${season.name}: you were a housemate. The season has ended.`
+    : `${season.name}: you've been selected! You can enter once the season goes live.`;
 }
 
 // ------------------------------------------------------------------ sign in
@@ -216,26 +254,42 @@ export async function showAuthVerify(parent: HTMLElement): Promise<void> {
 
 // ------------------------------------------------------------------ apply
 
-export async function showApply(parent: HTMLElement): Promise<void> {
+export async function showApply(parent: HTMLElement, seasonId: string): Promise<void> {
   const me = await api.me();
   if (!me) {
-    location.replace(`/signin?next=${encodeURIComponent("/apply")}`);
+    location.replace(`/signin?next=${encodeURIComponent(location.pathname)}`);
     return;
   }
   const main = page(parent, me);
-  const season = me.season;
-  if (!season || season.status !== "applications") {
-    card(main, "Applications are closed", season ? `${season.name} is already live.` : "The next season hasn't opened for applications yet.");
-    if (me.application) main.append(applicationStatusCard(me));
+  let season: PublicSeason;
+  try {
+    season = await api.season(seasonId);
+  } catch {
+    card(main, "Season not found", "That season doesn't exist (or isn't open yet).").append(linkButton("/", "See live houses"));
     return;
   }
-  if (me.application && me.application.status !== "pending") {
-    main.append(applicationStatusCard(me));
+  const existing = me.applications.find((a) => a.season.id === season.id);
+  if (season.status !== "applications") {
+    const c = card(main, `${season.name} isn't taking applications`, season.status === "live" ? "It's live now — come and watch!" : "");
+    if (existing) c.append(para(applicationLine(season, existing.application)));
+    c.append(linkButton(season.status === "live" ? `/watch/${encodeURIComponent(season.id)}` : "/", season.status === "live" ? "Watch live" : "Back home"));
+    return;
+  }
+  if (existing && existing.application.status !== "pending") {
+    card(main, season.name, applicationLine(season, existing.application));
+    return;
+  }
+  if (me.hosting.some((s) => s.id === season.id)) {
+    card(main, season.name, "You host this season, so you can't apply to it.");
     return;
   }
 
-  const c = card(main, `Apply for ${season.name}`, `${seasonLine(season)}. You can edit your application until it's reviewed.`);
-  const a = me.application;
+  const a = existing?.application;
+  const c = card(
+    main,
+    `Apply for ${season.name}`,
+    `${season.hostName ? `Hosted by ${season.hostName}. ` : ""}${seasonLine(season)}. You can edit your application until it's reviewed.`,
+  );
   const form = document.createElement("form");
   form.className = "stack apply-form";
   form.innerHTML = `
@@ -283,7 +337,7 @@ export async function showApply(parent: HTMLElement): Promise<void> {
       consentRules: f("consentRules").checked,
     };
     try {
-      await api.apply(input);
+      await api.apply(season.id, input);
       location.href = "/";
     } catch (err) {
       error.textContent = err instanceof ApiError || err instanceof Error ? err.message : String(err);

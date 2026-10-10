@@ -1,23 +1,27 @@
 import * as THREE from "three";
-import { REWARDS, type AnimState, type RewardId } from "@bbn/shared";
+import { REWARDS, decodeLook, type AnimState, type RewardId } from "@bbn/shared";
 import { mat } from "../scene/materials.js";
 import { createNameTag } from "./nameTag.js";
 import { ChatBubble } from "./chatBubble.js";
 import { VoiceIcon, type VoiceIconState } from "./voiceIcon.js";
+import { Character } from "./character.js";
+import { loadModel } from "./characterModels.js";
 
 const SKIN = 0xe0ac69;
 const DARK = 0x2a2a35;
 const HALF_PI = Math.PI / 2;
+const HOP_SECONDS = 0.5;
+const HOP_HEIGHT = 0.45;
 
 /**
- * Low-poly housemate: capsule body, sphere head, four capsule limbs and a name tag.
+ * A housemate: their character (the rigged model, dressed in their look — see
+ * character.ts) plus name tag, voice icon and chat bubble.
  *
- * Animation is procedural — instead of keyframed clips, limb angles are
- * computed every frame from the current animation state and a clock. That
- * costs nothing to author and blends naturally between idle and walking.
+ * Until the model has loaded (or for a client without a look) a simple
+ * capsule figure stands in, animated procedurally from the same states.
  *
  * Hierarchy: root (placed by the game) → pose (raised/lowered/tipped over per
- * activity, e.g. lying in bed) → body (bobs) + legs.
+ * activity, e.g. lying in bed) → body (bobs) + legs, or the character.
  */
 export class Avatar {
   readonly root = new THREE.Group();
@@ -32,16 +36,25 @@ export class Avatar {
   private readonly name: string;
   private readonly crown: THREE.Group;
   private perksKey = "";
+  private badges = "";
+  private moodIcon = "";
+  /** Holding something in both hands (a carried prop). */
+  private carrying = false;
   private readonly voiceIcon = new VoiceIcon();
   private readonly bubble = new ChatBubble();
+  /** The rigged character, once its model has loaded. */
+  private character: Character | null = null;
+  private disposed = false;
 
+  /** Seconds left in the current jump hop. */
+  private hopLeft = 0;
   private walkPhase = 0;
   /** 0 = standing still, 1 = full walk cycle. Smoothed so starts/stops ease in. */
   private walkAmount = 0;
   private time = 0;
   private labelHeight = 2.15;
 
-  constructor(name: string, color: THREE.ColorRepresentation) {
+  constructor(name: string, color: THREE.ColorRepresentation, look?: string) {
     this.name = name;
     const shirt = mat(color);
     this.root.add(this.pose);
@@ -74,6 +87,23 @@ export class Avatar {
     this.crown.visible = false;
     this.body.add(this.crown);
 
+    if (look) {
+      const chosen = decodeLook(look);
+      void loadModel(chosen.body === 1 ? "suit" : "hoodie")
+        .then((model) => {
+          if (this.disposed) return;
+          this.character = new Character(model, chosen);
+          // Swap the stand-in for the real character; the crown moves onto it.
+          this.body.visible = false;
+          this.leftLeg.visible = false;
+          this.rightLeg.visible = false;
+          this.pose.add(this.character.object);
+          this.crown.position.y = 1.9;
+          this.pose.add(this.crown);
+        })
+        .catch((err) => console.warn("[avatar] couldn't load the character model", err));
+    }
+
     // Labels hang off the root (not the pose) so they stay upright when lying down.
     this.tag = createNameTag(name);
     this.root.add(this.tag, this.voiceIcon.sprite, this.bubble.sprite);
@@ -82,6 +112,11 @@ export class Avatar {
     this.root.traverse((o) => {
       if (o instanceof THREE.Mesh) o.castShadow = true;
     });
+  }
+
+  /** Arms forward, holding a carried object. */
+  setCarrying(carrying: boolean): void {
+    this.carrying = carrying;
   }
 
   setVoiceState(state: VoiceIconState): void {
@@ -94,11 +129,22 @@ export class Avatar {
     if (key === this.perksKey) return;
     this.perksKey = key;
     this.crown.visible = perks.includes("crown");
-    const badges = perks
+    this.badges = perks
       .filter((p) => p !== "crown" && p in REWARDS)
       .map((p) => REWARDS[p as RewardId].icon)
       .join("");
-    const tag = createNameTag(badges ? `${this.name} ${badges}` : this.name);
+    this.rebuildTag();
+  }
+
+  /** Mood face after the name while a need is running low ("" = none). */
+  setMood(icon: string): void {
+    if (icon === this.moodIcon) return;
+    this.moodIcon = icon;
+    this.rebuildTag();
+  }
+
+  private rebuildTag(): void {
+    const tag = createNameTag([this.name, this.badges, this.moodIcon].filter(Boolean).join(" "));
     tag.position.copy(this.tag.position);
     this.root.remove(this.tag);
     this.tag.material.map?.dispose();
@@ -107,12 +153,22 @@ export class Avatar {
     this.root.add(tag);
   }
 
+  /** Plays a jump hop (half a second, about 0.45 m high). */
+  hop(): void {
+    this.hopLeft = HOP_SECONDS;
+  }
+
   showChat(text: string): void {
     this.bubble.show(text);
   }
 
   /** Frees GPU resources. Materials are shared (see scene/materials.ts) and are kept. */
   dispose(): void {
+    this.disposed = true;
+    // The character's skinned meshes share geometry with the cached model: detach it
+    // before the traversal below disposes this avatar's own geometry.
+    this.character?.object.removeFromParent();
+    this.character?.dispose();
     this.voiceIcon.dispose();
     this.bubble.dispose();
     this.root.removeFromParent();
@@ -179,7 +235,7 @@ export class Avatar {
       case "dance": {
         const beat = t * 6;
         this.body.position.y = Math.abs(Math.sin(beat)) * 0.1;
-        this.body.rotation.y = Math.sin(beat / 2) * 0.4;
+        this.body.rotation.y = Math.sin(beat / 2) * 0.08;
         this.leftArm.rotation.z = 2.4 + Math.sin(beat) * 0.4;
         this.rightArm.rotation.z = -2.4 + Math.sin(beat) * 0.4;
         this.leftLeg.rotation.x = Math.sin(beat) * 0.3;
@@ -187,6 +243,9 @@ export class Avatar {
         break;
       }
       case "sit":
+      case "eat":
+      case "toilet":
+      case "bath":
         // Lower the hips onto the seat (≈0.45 m) and swing the legs forward.
         this.pose.position.y = -0.33;
         this.leftLeg.rotation.x = -HALF_PI;
@@ -210,6 +269,11 @@ export class Avatar {
         this.rightArm.rotation.z = Math.sin(t * 5) * 0.3;
         this.body.position.y = breathe;
         break;
+      case "drink":
+        this.rightArm.rotation.x = -1.4;
+        this.rightArm.rotation.z = -0.4 + Math.sin(t * 1.5) * 0.15;
+        this.body.position.y = breathe;
+        break;
       case "swim":
         // Sink so only head and shoulders show above the water; front-crawl arms.
         this.pose.position.y = -1.15 + Math.sin(t * 2) * 0.04;
@@ -217,6 +281,31 @@ export class Avatar {
         this.rightArm.rotation.x = -t * 4 + Math.PI;
         labelHeight -= 1.1;
         break;
+    }
+    if (this.carrying && (anim === "idle" || anim === "walk")) {
+      // Both arms reach forward to hold the object in front of the chest.
+      this.leftArm.rotation.set(-1.25, 0, -0.18);
+      this.rightArm.rotation.set(-1.25, 0, 0.18);
+    }
+    if (this.character) {
+      // The model has its own bob and limbs; keep only the whole-body placement
+      // from above (lowered onto a seat, lying in bed, in the pool, on the treadmill).
+      if (anim === "sit" || anim === "eat" || anim === "toilet") this.pose.position.y = -0.4;
+      else if (anim === "bath") this.pose.position.y = -0.62;
+      else if (anim === "sitFloor") this.pose.position.y = -0.8;
+      else if (anim === "lieDown") {
+        // Lying flat on the floor, face up, head towards where you were facing.
+        this.pose.rotation.x = -HALF_PI;
+        this.pose.position.y = 0.16;
+      }
+      this.character.update(dt, anim, speed, this.carrying);
+    }
+    if (anim === "sitFloor") labelHeight -= 0.8;
+    else if (anim === "lieDown") labelHeight = 0.9;
+    if (this.hopLeft > 0) {
+      this.hopLeft = Math.max(0, this.hopLeft - dt);
+      const k = 1 - this.hopLeft / HOP_SECONDS;
+      this.pose.position.y += 4 * HOP_HEIGHT * k * (1 - k);
     }
     this.placeLabels(labelHeight);
   }

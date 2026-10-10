@@ -3,9 +3,11 @@ import {
   REWARDS,
   REWARD_IDS,
   TASKS,
+  VOTE_LENGTHS_SEC,
   type EventLogEntry,
   type HouseStateView,
   type RewardId,
+  type RoundAdminView,
   type TaskType,
 } from "@bbn/shared";
 import { ChatPanel } from "./chat.js";
@@ -23,9 +25,21 @@ export interface AdminHandlers {
   onDiaryChat(text: string): void;
   onStartTask(type: TaskType, reward: RewardId): void;
   onEndTask(): void;
+  onStartNominations(): void;
+  onCancelNominations(): void;
+  onCloseNominations(): void;
+  onBbNominate(playerId: string): void;
+  onOpenVoting(seconds: number): void;
+  onCloseVoting(): void;
+  onReveal(token: string): void;
+  onStartFinale(): void;
   onMute(playerId: string, muted: boolean): void;
   onKick(playerId: string, name: string): void;
   onFollow(playerId: string): void;
+  /** House clock (minutes since midnight). */
+  onSetTime(minutes: number): void;
+  /** Every room's lights on or off at once. */
+  onAllLights(on: boolean): void;
   /** Hold-to-talk pressed/released. */
   onTalk(target: TalkTarget, held: boolean): void;
 }
@@ -45,6 +59,21 @@ export class AdminPanel {
   private readonly startTaskBtn: HTMLButtonElement;
   private readonly endTaskBtn: HTMLButtonElement;
   private readonly log: HTMLElement;
+  private readonly roundStatus: HTMLElement;
+  private readonly roundDetail: HTMLElement;
+  private readonly roundActions: HTMLElement;
+  private roundView: RoundAdminView = {
+    step: "idle",
+    text: "Connecting…",
+    kind: "",
+    votesCast: 0,
+    ballots: [],
+    canAdd: [],
+    tie: [],
+  };
+  private lastRoundKey = "";
+  private clockOffset = 0;
+  private lastServerTime = 0;
   private readonly talkButtons: Record<TalkTarget, HTMLButtonElement>;
   private readonly micNote: HTMLElement;
   private lastListKey = "";
@@ -69,6 +98,7 @@ export class AdminPanel {
           <button type="button" class="talk-btn" data-target="house">📣 Hold to talk: whole house <kbd>B</kbd></button>
           <p class="admin-note mic-note"></p>
         </div>
+        <p class="admin-note season-stats"></p>
         <div class="admin-tabs" role="tablist">
           <button type="button" role="tab" data-tab="live" aria-selected="true">Live</button>
           <button type="button" role="tab" data-tab="season" aria-selected="false">Season &amp; applicants</button>
@@ -85,6 +115,18 @@ export class AdminPanel {
       </section>
 
       <section>
+        <h2>House</h2>
+        <div class="house-controls">
+          <button type="button" data-time="420">🌅 Morning (7:00)</button>
+          <button type="button" data-time="780">☀️ Afternoon (13:00)</button>
+          <button type="button" data-time="1140">🌇 Sunset (19:00)</button>
+          <button type="button" data-time="1380">🌙 Night (23:00)</button>
+          <button type="button" data-lights="off">💡 Lights out</button>
+          <button type="button" data-lights="on">💡 All lights on</button>
+        </div>
+      </section>
+
+      <section>
         <h2>Housemates</h2>
         <ul class="admin-housemates"></ul>
       </section>
@@ -95,6 +137,24 @@ export class AdminPanel {
         <label class="check"><input type="checkbox" class="broadcast" /> Broadcast to viewers</label>
         <div class="diary-chat-slot"></div>
         <button type="button" class="end-diary">End session</button>
+      </section>
+
+      <section>
+        <h2>Nominations &amp; eviction</h2>
+        <p class="round-status admin-note"></p>
+        <div class="round-detail"></div>
+        <div class="round-actions">
+          <button type="button" data-round="start-noms">Start nominations</button>
+          <button type="button" data-round="close-noms">Close nominations</button>
+          <button type="button" data-round="cancel-noms">Cancel</button>
+          <select class="vote-length" aria-label="Voting length">
+            ${VOTE_LENGTHS_SEC.map((s) => `<option value="${s}">${s === 60 ? "1 minute" : `${s / 60} minutes`}</option>`).join("")}
+          </select>
+          <button type="button" data-round="open-vote">Open voting</button>
+          <button type="button" data-round="close-vote">Close voting</button>
+          <button type="button" data-round="reveal">Reveal result</button>
+          <button type="button" data-round="finale">Finale vote</button>
+        </div>
       </section>
 
       <section>
@@ -130,6 +190,9 @@ export class AdminPanel {
     this.startTaskBtn = $(".start-task");
     this.endTaskBtn = $(".end-task");
     this.log = $(".event-log");
+    this.roundStatus = $(".round-status");
+    this.roundDetail = $(".round-detail");
+    this.roundActions = $(".round-actions");
     this.micNote = $(".mic-note");
     this.talkButtons = { diary: $('[data-target="diary"]'), house: $('[data-target="house"]') };
 
@@ -148,6 +211,14 @@ export class AdminPanel {
       className: "admin-diary-chat",
       label: "Diary Room chat",
       placeholder: "Type to the Diary Room…",
+    });
+
+    // House clock and lights.
+    $(".house-controls").addEventListener("click", (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button");
+      if (!b) return;
+      if (b.dataset.time) handlers.onSetTime(Number(b.dataset.time));
+      if (b.dataset.lights) handlers.onAllLights(b.dataset.lights === "on");
     });
 
     // Announcements
@@ -194,6 +265,34 @@ export class AdminPanel {
       handlers.onStartTask($<HTMLSelectElement>(".task-type").value as TaskType, $<HTMLSelectElement>(".task-reward").value as RewardId),
     );
     this.endTaskBtn.addEventListener("click", () => handlers.onEndTask());
+
+    this.roundActions.addEventListener("click", (e) => {
+      const act = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-round]")?.dataset.round;
+      if (!act) return;
+      const seconds = Number($<HTMLSelectElement>(".vote-length").value);
+      if (act === "start-noms") handlers.onStartNominations();
+      if (act === "close-noms") handlers.onCloseNominations();
+      if (act === "cancel-noms" && confirm("Cancel nominations? Nothing that's been said counts.")) handlers.onCancelNominations();
+      if (act === "open-vote") handlers.onOpenVoting(seconds);
+      if (act === "close-vote") handlers.onCloseVoting();
+      if (act === "reveal") {
+        const finale = this.roundView.kind === "finale";
+        const question = finale ? "Reveal the winner?" : "Reveal the result and evict the nominee with the fewest votes to save?";
+        if (confirm(question)) handlers.onReveal("");
+      }
+      if (act === "finale") handlers.onStartFinale();
+    });
+    this.roundDetail.addEventListener("click", (e) => {
+      const button = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-add], button[data-tie]");
+      if (!button) return;
+      if (button.dataset.add) handlers.onBbNominate(button.dataset.add);
+      if (button.dataset.tie) handlers.onReveal(button.dataset.tie);
+    });
+  }
+
+  setStats(text: string): void {
+    const el = this.el.querySelector(".season-stats");
+    if (el) el.textContent = text;
   }
 
   setTalking(target: TalkTarget | null): void {
@@ -214,11 +313,21 @@ export class AdminPanel {
     while (this.log.children.length > 300) this.log.lastElementChild!.remove();
   }
 
+  setRound(view: RoundAdminView): void {
+    this.roundView = view;
+    this.lastRoundKey = "";
+  }
+
   /** Call every frame; only touches the DOM when something changed. */
   update(state: HouseStateView): void {
+    if (state.serverTime && state.serverTime !== this.lastServerTime) {
+      this.lastServerTime = state.serverTime;
+      this.clockOffset = state.serverTime - Date.now();
+    }
     this.renderHousemates(state);
     this.renderDiary(state);
     this.renderTask(state);
+    this.renderRound(state);
   }
 
   private renderHousemates(state: HouseStateView): void {
@@ -299,6 +408,82 @@ export class AdminPanel {
     this.endTaskBtn.disabled = !running;
     this.startTaskBtn.textContent = running ? "Replace" : "Start";
   }
+
+  private renderRound(state: HouseStateView): void {
+    const view = this.roundView;
+    const step = view.step;
+    const voting = step === "voting";
+    const remaining =
+      voting && state.round?.voteEndsAt ? Math.max(0, Math.ceil((state.round.voteEndsAt - (Date.now() + this.clockOffset)) / 1000)) : null;
+    const key = JSON.stringify([step, view.text, view.ballots, view.canAdd, view.tie, view.votesCast, remaining]);
+    if (key === this.lastRoundKey) return;
+    this.lastRoundKey = key;
+
+    const clock = remaining === null ? "" : ` · ${formatClock(remaining)} left`;
+    this.roundStatus.textContent = `${view.text}${clock}`;
+
+    const show = (name: string, on: boolean) => {
+      const button = this.roundActions.querySelector<HTMLButtonElement>(`button[data-round="${name}"]`);
+      if (button) button.hidden = !on;
+    };
+    const idle = step === "idle";
+    show("start-noms", idle);
+    show("finale", idle);
+    show("close-noms", step === "nominating");
+    show("cancel-noms", step === "nominating" || step === "needs-nominee");
+    show("open-vote", step === "ready-to-vote");
+    show("close-vote", voting);
+    show("reveal", step === "ready-to-reveal" && view.tie.length === 0);
+    const length = this.roundActions.querySelector<HTMLSelectElement>(".vote-length");
+    if (length) length.hidden = step !== "ready-to-vote";
+
+    this.roundDetail.replaceChildren();
+    if (view.ballots.length) {
+      const list = document.createElement("ul");
+      list.className = "round-ballots";
+      for (const ballot of view.ballots) {
+        const li = document.createElement("li");
+        const name = document.createElement("b");
+        name.textContent = ballot.name;
+        const picks = document.createElement("span");
+        picks.textContent = ballot.picks.length ? ` → ${ballot.picks.join(", ")}` : " — waiting";
+        li.append(name, picks);
+        list.append(li);
+      }
+      this.roundDetail.append(list);
+    }
+    if (view.canAdd.length) {
+      const row = document.createElement("div");
+      row.className = "round-extra";
+      for (const choice of view.canAdd) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.add = choice.id;
+        button.textContent = `Nominate ${choice.name}`;
+        row.append(button);
+      }
+      this.roundDetail.append(row);
+    }
+    if (view.tie.length) {
+      const row = document.createElement("div");
+      row.className = "round-extra";
+      const finale = view.kind === "finale";
+      for (const choice of view.tie) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.tie = choice.id;
+        button.textContent = finale ? `Crown ${choice.name}` : `Evict ${choice.name}`;
+        row.append(button);
+      }
+      this.roundDetail.append(row);
+    }
+  }
+}
+
+function formatClock(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 function button(act: string, label: string, disabled = false): HTMLButtonElement {

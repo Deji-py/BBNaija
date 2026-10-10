@@ -1,7 +1,10 @@
 import {
   LIMITS,
+  REWARD_IDS,
   SEASON_STATUSES,
   isSafeHttpUrl,
+  isValidEmail,
+  type RewardId,
   type AdminApplication,
   type AdminSeason,
   type ApplicationInput,
@@ -11,7 +14,7 @@ import {
   type SeasonStatus,
 } from "@bbn/shared";
 import { db } from "../db/client.js";
-import type { Application, Season } from "../generated/prisma/client.js";
+import type { Application, Season, User } from "../generated/prisma/client.js";
 
 export class SeasonError extends Error {
   constructor(
@@ -22,22 +25,28 @@ export class SeasonError extends Error {
   }
 }
 
-/** Statuses during which a season is "the" current one. Only one season may be in either at a time. */
-const OPEN_STATUSES: SeasonStatus[] = ["applications", "live"];
+type SeasonWithHost = Season & { host?: User | null };
 
-/** The season the public sees: taking applications or live. */
-export async function currentSeason(): Promise<Season | null> {
-  return db.season.findFirst({ where: { status: { in: OPEN_STATUSES } }, orderBy: { createdAt: "desc" } });
+export async function getSeason(seasonId: unknown): Promise<SeasonWithHost | null> {
+  if (typeof seasonId !== "string" || !seasonId || seasonId.length > 64) return null;
+  return db.season.findUnique({ where: { id: seasonId }, include: { host: true } });
 }
 
-export async function toPublicSeason(season: Season): Promise<PublicSeason> {
+/** Seasons in a given status, newest first, with their hosts. */
+export function seasonsWithStatus(status: SeasonStatus): Promise<SeasonWithHost[]> {
+  return db.season.findMany({ where: { status }, orderBy: { createdAt: "desc" }, include: { host: true } });
+}
+
+export async function toPublicSeason(season: SeasonWithHost): Promise<PublicSeason> {
   const selectedCount = await db.housemate.count({ where: { seasonId: season.id, status: { not: "removed" } } });
+  const host = season.host === undefined && season.hostUserId ? await db.user.findUnique({ where: { id: season.hostUserId } }) : season.host;
   return {
     id: season.id,
     name: season.name,
     status: season.status as SeasonStatus,
     maxHousemates: season.maxHousemates,
     selectedCount,
+    hostName: host ? (host.displayName ?? host.email.split("@")[0]!) : "",
   };
 }
 
@@ -59,18 +68,50 @@ export function toApplicationView(a: Application): ApplicationView {
   };
 }
 
+/** Reward ids stored on a housemate. Anything else in the JSON is ignored. */
+export function parsePerks(raw: string | null | undefined): RewardId[] {
+  try {
+    const value = JSON.parse(raw || "[]") as unknown;
+    if (!Array.isArray(value)) return [];
+    return value.filter((p): p is RewardId => typeof p === "string" && REWARD_IDS.includes(p as RewardId));
+  } catch {
+    return [];
+  }
+}
+
+/** Remember the rewards a housemate is currently holding (immunity, nomination power, crown). */
+export async function savePerks(userId: string, seasonId: string, perks: readonly string[]): Promise<void> {
+  const clean = parsePerks(JSON.stringify(perks));
+  await db.housemate.update({ where: { userId_seasonId: { userId, seasonId } }, data: { perks: JSON.stringify(clean) } });
+}
+
 /**
- * Who may enter the house as a housemate right now: a selected housemate
- * (not removed/evicted) of the season that's live.
+ * May this user enter this house as a housemate right now? A selected housemate
+ * of a live season, still active — or the winner, until the season ends.
+ * Evicted housemates watch instead.
  */
-export async function housemateAccess(userId: string): Promise<{ season: Season; displayName: string } | null> {
-  const season = await db.season.findFirst({ where: { status: "live" }, orderBy: { createdAt: "desc" } });
-  if (!season) return null;
-  const hm = await db.housemate.findUnique({ where: { userId_seasonId: { userId, seasonId: season.id } } });
-  if (!hm || hm.status !== "active") return null;
-  const app = await db.application.findUnique({ where: { userId_seasonId: { userId, seasonId: season.id } } });
+export async function housemateAccess(userId: string, seasonId: string): Promise<{ displayName: string; perks: RewardId[] } | null> {
+  const season = await getSeason(seasonId);
+  if (!season || season.status !== "live") return null;
+  const hm = await db.housemate.findUnique({ where: { userId_seasonId: { userId, seasonId } } });
+  if (!hm || (hm.status !== "active" && hm.status !== "winner")) return null;
+  const app = await db.application.findUnique({ where: { userId_seasonId: { userId, seasonId } } });
   const user = await db.user.findUnique({ where: { id: userId } });
-  return { season, displayName: app?.displayName ?? user?.displayName ?? "Housemate" };
+  return { displayName: app?.displayName ?? user?.displayName ?? "Housemate", perks: parsePerks(hm.perks) };
+}
+
+/** Live seasons this user may enter as a housemate. */
+export async function enterableSeasons(userId: string): Promise<SeasonWithHost[]> {
+  const rows = await db.housemate.findMany({
+    where: { userId, status: { in: ["active", "winner"] }, season: { status: "live" } },
+    include: { season: { include: { host: true } } },
+  });
+  return rows.map((r) => r.season);
+}
+
+/** Is this user the host of this season? */
+export function isHostOf(user: { id: string } | null, season: Season | null): boolean {
+  return !!user && !!season && season.hostUserId === user.id;
 }
 
 // ------------------------------------------------------------------ applications
@@ -106,53 +147,78 @@ export function parseApplication(body: unknown): ApplicationInput {
   return input;
 }
 
-/** Submit (or, while still pending, update) an application to the season taking applications. */
-export async function submitApplication(userId: string, input: ApplicationInput): Promise<ApplicationView> {
-  const season = await db.season.findFirst({ where: { status: "applications" }, orderBy: { createdAt: "desc" } });
-  if (!season) throw new SeasonError("FORBIDDEN", "Applications aren't open right now.");
+/** Submit (or, while still pending, update) an application to a season that's taking applications. */
+export async function submitApplication(userId: string, seasonId: string, input: ApplicationInput): Promise<ApplicationView> {
+  const season = await getSeason(seasonId);
+  if (!season) throw new SeasonError("NOT_FOUND", "Season not found.");
+  if (season.status !== "applications") throw new SeasonError("FORBIDDEN", "This season isn't taking applications.");
+  if (season.hostUserId === userId) throw new SeasonError("FORBIDDEN", "You host this season, so you can't apply to it.");
 
-  const existing = await db.application.findUnique({ where: { userId_seasonId: { userId, seasonId: season.id } } });
+  const existing = await db.application.findUnique({ where: { userId_seasonId: { userId, seasonId } } });
   if (existing && existing.status !== "pending") {
     throw new SeasonError("CONFLICT", "Your application has already been reviewed.");
   }
   const data = { ...input, clipUrl: input.clipUrl || null };
   const app = existing
     ? await db.application.update({ where: { id: existing.id }, data })
-    : await db.application.create({ data: { ...data, userId, seasonId: season.id } });
+    : await db.application.create({ data: { ...data, userId, seasonId } });
   await db.user.update({ where: { id: userId }, data: { displayName: input.displayName } });
   return toApplicationView(app);
 }
 
-// ------------------------------------------------------------------ admin
+// ------------------------------------------------------------------ console (admin & hosts)
 
-export async function listSeasons(): Promise<AdminSeason[]> {
-  const seasons = await db.season.findMany({ orderBy: { createdAt: "desc" }, include: { _count: { select: { applications: true } } } });
+/** Seasons for the console: all of them for the platform admin, or just the ones a host runs. */
+export async function listSeasons(hostUserId?: string): Promise<AdminSeason[]> {
+  const seasons = await db.season.findMany({
+    where: hostUserId ? { hostUserId } : {},
+    orderBy: { createdAt: "desc" },
+    include: { host: true, _count: { select: { applications: true } } },
+  });
   return Promise.all(
     seasons.map(async (s) => ({
       ...(await toPublicSeason(s)),
       applicationCount: s._count.applications,
       createdAt: s.createdAt.toISOString(),
+      hostEmail: s.host?.email ?? "",
     })),
   );
 }
 
-export async function createSeason(body: unknown): Promise<void> {
+export async function createSeason(body: unknown): Promise<Season> {
   const b = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
   const name = typeof b.name === "string" ? b.name.trim() : "";
   const max = Number(b.maxHousemates);
   if (!name || name.length > LIMITS.seasonName) throw new SeasonError("BAD_REQUEST", "Give the season a name (max 60 characters).");
   if (!Number.isInteger(max) || max < 2 || max > 8) throw new SeasonError("BAD_REQUEST", "Max housemates must be 2–8.");
-  await db.season.create({ data: { name, maxHousemates: max } });
+  const season = await db.season.create({ data: { name, maxHousemates: max } });
+  if (typeof b.hostEmail === "string" && b.hostEmail.trim()) await setSeasonHost(season.id, b.hostEmail);
+  return season;
+}
+
+/**
+ * Assigns (or, with an empty email, removes) a season's host. The host account
+ * is created if needed, so they can simply sign in with that email.
+ */
+export async function setSeasonHost(seasonId: string, rawEmail: unknown): Promise<{ season: Season; email: string }> {
+  const season = await getSeason(seasonId);
+  if (!season) throw new SeasonError("NOT_FOUND", "Season not found.");
+  const email = typeof rawEmail === "string" ? rawEmail.trim().toLowerCase() : "";
+  if (!email) {
+    return { season: await db.season.update({ where: { id: seasonId }, data: { hostUserId: null } }), email: "" };
+  }
+  if (!isValidEmail(email)) throw new SeasonError("BAD_REQUEST", "Enter a valid email for the host.");
+  const host = await db.user.upsert({ where: { email }, update: {}, create: { email } });
+  if (host.bannedAt) throw new SeasonError("FORBIDDEN", "That account is banned.");
+  const applied = await db.application.findUnique({ where: { userId_seasonId: { userId: host.id, seasonId } } });
+  if (applied) throw new SeasonError("CONFLICT", "That person applied to this season, so they can't host it.");
+  return { season: await db.season.update({ where: { id: seasonId }, data: { hostUserId: host.id } }), email };
 }
 
 export async function setSeasonStatus(seasonId: string, status: unknown): Promise<Season> {
   if (!SEASON_STATUSES.includes(status as SeasonStatus)) throw new SeasonError("BAD_REQUEST", "Unknown status.");
-  const season = await db.season.findUnique({ where: { id: seasonId } });
+  const season = await getSeason(seasonId);
   if (!season) throw new SeasonError("NOT_FOUND", "Season not found.");
-  if (OPEN_STATUSES.includes(status as SeasonStatus)) {
-    const other = await db.season.findFirst({ where: { id: { not: seasonId }, status: { in: OPEN_STATUSES } } });
-    if (other) throw new SeasonError("CONFLICT", `“${other.name}” is already ${other.status === "live" ? "live" : "taking applications"}. End it first.`);
-  }
   const data: { status: string; startsAt?: Date; endsAt?: Date } = { status: status as string };
   if (status === "live" && !season.startsAt) data.startsAt = new Date();
   if (status === "ended") data.endsAt = new Date();
@@ -162,6 +228,13 @@ export async function setSeasonStatus(seasonId: string, status: unknown): Promis
 export async function listApplications(seasonId: string): Promise<AdminApplication[]> {
   const apps = await db.application.findMany({ where: { seasonId }, orderBy: { createdAt: "asc" }, include: { user: true } });
   return apps.map((a) => ({ ...toApplicationView(a), email: a.user.email, userId: a.userId }));
+}
+
+/** The season an application belongs to (for permission checks). */
+export async function applicationSeason(applicationId: unknown): Promise<Season | null> {
+  if (typeof applicationId !== "string") return null;
+  const app = await db.application.findUnique({ where: { id: applicationId }, include: { season: true } });
+  return app?.season ?? null;
 }
 
 /**

@@ -1,61 +1,52 @@
-import { AVATAR_COLORS, NAME_MAX_LENGTH, type JoinOptions } from "@bbn/shared";
+import { NAME_MAX_LENGTH, type JoinOptions } from "@bbn/shared";
+import { getSessionToken } from "../net/api.js";
+import { CharacterCreator } from "./creator.js";
 
 const STORAGE_KEY = "bbn:lobby";
 
-/**
- * Colour picker shown before entering the house. Your name comes from your
- * application (the server uses it, whatever the client sends).
- * `onSubmit` should resolve when joined, or throw to show an error and let the user retry.
- */
+/** What the lobby lets you choose; the caller adds which house and how you're signed in. */
+export type LobbyChoice = Pick<JoinOptions, "name" | "color" | "look">;
+
 /** Lets the join step show a hint (with an optional action) under the button while it waits. */
 export interface LobbyStatus {
   hint(text: string, actionLabel?: string, onAction?: () => void): void;
 }
 
+/**
+ * Character creator shown before entering the house. Your name comes from your
+ * application (the server uses it, whatever the client sends).
+ * `onSubmit` should resolve when joined, or throw to show an error and let the user retry.
+ */
 export function showLobby(
   parent: HTMLElement,
   displayName: string,
-  onSubmit: (options: JoinOptions, status: LobbyStatus) => Promise<void>,
+  onSubmit: (options: LobbyChoice, status: LobbyStatus) => Promise<void>,
 ): void {
-  const saved = loadSaved();
   const el = document.createElement("div");
   el.className = "overlay";
   el.innerHTML = `
-    <form class="card lobby">
-      <h1>Enter the house</h1>
-      <p class="muted">You're entering as <b class="entering-as"></b>. Pick your colour.</p>
-      <fieldset class="field">
-        <legend>Colour</legend>
-        <div class="swatches">
-          ${AVATAR_COLORS.map(
-            (c) => `<label class="swatch" style="--c:${c}"><input type="radio" name="color" value="${c}" aria-label="${c}" /></label>`,
-          ).join("")}
-        </div>
-      </fieldset>
-      <button type="submit">Enter the house</button>
+    <form class="card lobby creator-card">
+      <h1>Create your housemate</h1>
+      <p class="muted">You're entering as <b class="entering-as"></b>. Pick a body, then style your hair, clothes and accessories.</p>
+      <div class="creator-slot"></div>
+      <button type="submit" class="enter-button">Enter the house</button>
       <p class="lobby-hint" role="status"></p>
       <p class="error" role="alert"></p>
       <p class="switch-link"><a href="/">← Back</a> · <a href="/watch">Watch instead</a></p>
     </form>
   `;
   el.querySelector(".entering-as")!.textContent = displayName;
+  const creator = new CharacterCreator();
+  el.querySelector(".creator-slot")!.replaceWith(creator.el);
   parent.appendChild(el);
 
   const form = el.querySelector("form")!;
-  const button = form.querySelector("button")!;
+  const button = form.querySelector<HTMLButtonElement>(".enter-button")!;
   const errorEl = form.querySelector<HTMLElement>(".error")!;
-  const initialColor = AVATAR_COLORS.includes(saved.color as (typeof AVATAR_COLORS)[number])
-    ? saved.color!
-    : AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)]!;
-  form.querySelector<HTMLInputElement>(`input[value="${initialColor}"]`)!.checked = true;
-  button.focus();
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const options: JoinOptions = {
-      name: displayName,
-      color: (form.elements.namedItem("color") as RadioNodeList).value,
-    };
+    const options: LobbyChoice = { name: displayName, color: creator.color, look: creator.value };
     save(options);
     button.disabled = true;
     button.textContent = "Entering…";
@@ -76,6 +67,7 @@ export function showLobby(
     };
     try {
       await onSubmit(options, status);
+      creator.destroy();
       el.remove();
     } catch (err) {
       errorEl.textContent = describeError(err);
@@ -90,13 +82,14 @@ export function showLobby(
  * Start screen for spectators. Clicking "Start watching" is also the user
  * gesture browsers require before a page may play audio.
  */
-export function showWatchStart(parent: HTMLElement, onStart: (name: string) => Promise<void>): void {
+export function showWatchStart(parent: HTMLElement, onStart: (name: string) => Promise<void>, note?: string): void {
   const el = document.createElement("div");
   el.className = "overlay";
   el.innerHTML = `
     <form class="card lobby">
       <h1>Watch live</h1>
       <p class="muted">See and hear the house in real time. Housemates can't see you or your chat.</p>
+      <p class="vote-note"></p>
       <label class="field">
         <span>Your name in viewer chat (optional)</span>
         <input name="name" maxlength="${NAME_MAX_LENGTH}" autocomplete="nickname" placeholder="Viewer" />
@@ -107,6 +100,20 @@ export function showWatchStart(parent: HTMLElement, onStart: (name: string) => P
     </form>
   `;
   parent.appendChild(el);
+  const voteNote = el.querySelector<HTMLElement>(".vote-note")!;
+  if (note) {
+    voteNote.className = "muted";
+    voteNote.textContent = note;
+  } else if (getSessionToken()) {
+    voteNote.className = "muted";
+    voteNote.textContent = "You're signed in, so you can vote when a voting window opens.";
+  } else {
+    voteNote.className = "muted";
+    const link = document.createElement("a");
+    link.href = `/signin?next=${encodeURIComponent(location.pathname)}`;
+    link.textContent = "Sign in";
+    voteNote.append(link, document.createTextNode(" before you start watching if you want to vote. A vote is tied to your account."));
+  }
   const form = el.querySelector("form")!;
   const nameInput = form.elements.namedItem("name") as HTMLInputElement;
   const button = form.querySelector("button")!;
@@ -135,58 +142,30 @@ export function showWatchStart(parent: HTMLElement, onStart: (name: string) => P
   });
 }
 
-/** Sign-in for the Big Brother console. The secret is checked by the server. */
-export function showAdminLogin(parent: HTMLElement, onSubmit: (secret: string) => Promise<void>): void {
-  const el = document.createElement("div");
-  el.className = "overlay";
-  el.innerHTML = `
-    <form class="card lobby">
-      <h1>Big Brother console</h1>
-      <p class="muted">Production team only.</p>
-      <label class="field">
-        <span>Admin secret</span>
-        <input name="secret" type="password" required autocomplete="current-password" />
-      </label>
-      <button type="submit">Open console</button>
-      <p class="error" role="alert"></p>
-    </form>
-  `;
-  parent.appendChild(el);
-  const form = el.querySelector("form")!;
-  const input = form.elements.namedItem("secret") as HTMLInputElement;
-  const button = form.querySelector("button")!;
-  const errorEl = form.querySelector<HTMLElement>(".error")!;
-  input.focus();
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    button.disabled = true;
-    button.textContent = "Opening…";
-    errorEl.textContent = "";
-    try {
-      await onSubmit(input.value);
-      el.remove();
-    } catch (err) {
-      errorEl.textContent = describeError(err);
-      input.select();
-      button.disabled = false;
-      button.textContent = "Open console";
-    }
-  });
-}
-
-/** Full-screen message with a button that reloads the page. */
-export function showDisconnected(parent: HTMLElement, message: string): void {
+/** Full-screen message with a button that reloads the page, or follows `action`. */
+export function showDisconnected(
+  parent: HTMLElement,
+  message: string,
+  options?: { title?: string; action?: { label: string; href: string } },
+): void {
   const el = document.createElement("div");
   el.className = "overlay";
   el.innerHTML = `
     <div class="card">
-      <h2>Disconnected</h2>
+      <h2></h2>
       <p class="muted"></p>
-      <button type="button">Rejoin</button>
+      <button type="button"></button>
     </div>
   `;
+  el.querySelector("h2")!.textContent = options?.title ?? "Disconnected";
   el.querySelector("p")!.textContent = message;
-  el.querySelector("button")!.addEventListener("click", () => location.reload());
+  const button = el.querySelector("button")!;
+  const action = options?.action;
+  button.textContent = action?.label ?? "Rejoin";
+  button.addEventListener("click", () => {
+    if (action) location.href = action.href;
+    else location.reload();
+  });
   parent.appendChild(el);
 }
 
@@ -207,7 +186,7 @@ function loadSaved(): Partial<JoinOptions> & { viewerName?: string } {
   }
 }
 
-function save(options: JoinOptions): void {
+function save(options: LobbyChoice): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...loadSaved(), ...options }));
   } catch {

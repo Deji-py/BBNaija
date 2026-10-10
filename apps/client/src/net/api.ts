@@ -3,6 +3,7 @@ import type {
   AdminSeason,
   ApplicationInput,
   ApplicationView,
+  HousesResponse,
   LoginRequestResponse,
   LoginVerifyResponse,
   MeResponse,
@@ -56,7 +57,10 @@ async function request<T>(method: string, path: string, body?: unknown, headers:
 }
 
 export const api = {
-  season: () => request<{ season: PublicSeason | null }>("GET", "/api/season").then((r) => r.season),
+  /** Live houses (with live summaries) and seasons taking applications — the home-page grid. */
+  houses: () => request<HousesResponse>("GET", "/api/houses"),
+
+  season: (id: string) => request<{ season: PublicSeason }>("GET", `/api/seasons/${encodeURIComponent(id)}`).then((r) => r.season),
 
   requestLogin: (email: string) => request<LoginRequestResponse>("POST", "/api/auth/request", { email }),
 
@@ -85,17 +89,27 @@ export const api = {
     }
   },
 
-  apply: (input: ApplicationInput) =>
-    request<{ application: ApplicationView }>("POST", "/api/applications", input).then((r) => r.application),
+  apply: (seasonId: string, input: ApplicationInput) =>
+    request<{ application: ApplicationView }>("POST", `/api/seasons/${encodeURIComponent(seasonId)}/applications`, input).then(
+      (r) => r.application,
+    ),
 };
 
-/** Big Brother console calls, authorised with the admin secret. */
-export function adminApi(secret: string) {
-  const h = { "x-admin-secret": secret };
+/**
+ * Who's at the console: the platform admin (secret, every season) or a host
+ * (their normal sign-in, only the seasons they host).
+ */
+export type ConsoleAuth = { kind: "admin"; secret: string } | { kind: "host" };
+
+/** Big Brother console calls. */
+export function adminApi(auth: ConsoleAuth) {
+  // Hosts are authorised by their session token, which request() always sends.
+  const h: Record<string, string> = auth.kind === "admin" ? { "x-admin-secret": auth.secret } : {};
   return {
-    seasons: () => request<{ seasons: AdminSeason[] }>("GET", "/api/admin/seasons", undefined, h).then((r) => r.seasons),
-    createSeason: (name: string, maxHousemates: number) =>
-      request("POST", "/api/admin/seasons", { name, maxHousemates }, h),
+    seasons: () => request<{ seasons: AdminSeason[]; platformAdmin: boolean }>("GET", "/api/admin/seasons", undefined, h),
+    createSeason: (name: string, maxHousemates: number, hostEmail: string) =>
+      request("POST", "/api/admin/seasons", { name, maxHousemates, hostEmail }, h),
+    setHost: (id: string, email: string) => request("POST", `/api/admin/seasons/${encodeURIComponent(id)}/host`, { email }, h),
     setSeasonStatus: (id: string, status: string) =>
       request("POST", `/api/admin/seasons/${encodeURIComponent(id)}/status`, { status }, h),
     applications: (seasonId: string) =>
@@ -104,5 +118,26 @@ export function adminApi(secret: string) {
       ),
     decide: (applicationId: string, decision: "selected" | "rejected" | "pending") =>
       request("POST", `/api/admin/applications/${encodeURIComponent(applicationId)}/decision`, { decision }, h),
+    stats: (seasonId: string) =>
+      request<{ watchingNow: number; watchMinutes: number; signedInViewers: number; votes: number; voteWeight: number }>(
+        "GET",
+        `/api/admin/seasons/${encodeURIComponent(seasonId)}/stats`,
+        undefined,
+        h,
+      ),
   };
 }
+
+export interface PaymentPack {
+  id: string;
+  votes: number;
+  label: string;
+  priceLabel: string;
+}
+
+export const paymentsApi = {
+  config: () => request<{ enabled: boolean; packs: PaymentPack[] }>("GET", "/api/payments"),
+  checkout: (packId: string, seasonId: string) =>
+    request<{ url: string }>("POST", "/api/payments/checkout", { packId, seasonId }).then((r) => r.url),
+  verify: (reference: string) => request<{ message: string }>("POST", "/api/payments/verify", { reference }).then((r) => r.message),
+};

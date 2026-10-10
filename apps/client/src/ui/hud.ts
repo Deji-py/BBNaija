@@ -4,6 +4,7 @@ export class Hud {
   private readonly countEl: HTMLElement;
   private readonly fpsEl: HTMLElement;
   private readonly promptEl: HTMLElement;
+  private readonly clockEl: HTMLElement;
   private lastPrompt = "";
   private frames = 0;
   private elapsed = 0;
@@ -16,16 +17,25 @@ export class Hud {
       <div class="hud-top-left">
         <div class="hud-pill hud-area"></div>
         <div class="hud-pill hud-count"></div>
+        <div class="hud-pill hud-clock" hidden></div>
       </div>
       <div class="hud-fps"></div>
       <div class="hud-prompt" hidden></div>
-      <div class="hud-help">WASD move · drag / Z·C camera · E use · 1 wave · 2 dance · Enter chat · V talk · M mute</div>
+      <div class="hud-help">WASD move · Shift run · Space jump · drag / Z·C camera · E use · Q emotes · Enter chat · V talk · M mute</div>
     `;
     parent.appendChild(el);
     this.areaEl = el.querySelector(".hud-area")!;
     this.fpsEl = el.querySelector(".hud-fps")!;
     this.countEl = el.querySelector(".hud-count")!;
     this.promptEl = el.querySelector(".hud-prompt")!;
+    this.clockEl = el.querySelector(".hud-clock")!;
+  }
+
+  /** House clock, e.g. "🌙 22:05". */
+  setClock(text: string): void {
+    if (this.clockEl.textContent === text) return;
+    this.clockEl.hidden = false;
+    this.clockEl.textContent = text;
   }
 
   /** "Press E" hint for the nearby object; `available: false` shows it greyed out (e.g. full). */

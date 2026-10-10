@@ -1,5 +1,5 @@
 import { canHear, type HouseStateView, type VoiceContext } from "@bbn/shared";
-import type { MeshVoiceProvider } from "./meshVoice.js";
+import type { RoutedVoice } from "./VoiceProvider.js";
 
 export function voiceContext(state: HouseStateView): VoiceContext {
   const housemates = new Map<string, { adminMuted: boolean }>();
@@ -22,7 +22,7 @@ export function voiceContext(state: HouseStateView): VoiceContext {
  * its Diary Room / whole-house talk buttons).
  */
 export function applyVoiceRouting(
-  voice: MeshVoiceProvider,
+  voice: RoutedVoice,
   me: string,
   state: HouseStateView,
   sendFilter?: (peerId: string, ctx: VoiceContext) => boolean,
@@ -33,6 +33,6 @@ export function applyVoiceRouting(
     const hear = canHear(id, me, ctx);
     // Big Brother is heard everywhere at full volume; the console hears the Diary Room the same way.
     const direct = id === ctx.bigBrotherId || (me === ctx.bigBrotherId && id === ctx.diaryHousemate);
-    voice.spatial.setMode(id, !hear ? "muted" : direct ? "direct" : "spatial");
+    voice.setHearMode(id, !hear ? "muted" : direct ? "direct" : "spatial");
   }
 }

@@ -4,11 +4,12 @@ const DEV_ADMIN_SECRET = "bigbrother";
 export const isProduction = process.env.NODE_ENV === "production";
 
 /**
- * Public address of the site, used to build sign-in links in emails. Required in
- * production; in development links point at whatever origin asked for them.
+ * Public address of the site, used to build sign-in links and payment returns.
+ * Render supplies its public URL automatically; other production hosts set
+ * PUBLIC_URL explicitly. In development links use the requesting origin.
  */
-export const PUBLIC_URL = process.env.PUBLIC_URL;
-if (isProduction && !PUBLIC_URL) throw new Error("PUBLIC_URL must be set in production");
+export const PUBLIC_URL = process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL;
+if (isProduction && !PUBLIC_URL) throw new Error("PUBLIC_URL (or RENDER_EXTERNAL_URL) must be set in production");
 
 /**
  * Secret for the Big Brother console (/bigbrother). Set ADMIN_SECRET in

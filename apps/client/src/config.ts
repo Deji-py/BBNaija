@@ -1,6 +1,7 @@
 /**
- * Game server base URL. In development the Vite dev server proxies `/colyseus`
- * to the game server, so the page and the game share one origin. Set
- * VITE_SERVER_URL to point somewhere else (e.g. production in M9).
+ * Game server base URL. Development goes through Vite's `/colyseus` proxy.
+ * The production image serves the built client and Colyseus from the same
+ * origin, so it connects directly to that origin unless explicitly overridden.
  */
-export const SERVER_HTTP_URL = import.meta.env.VITE_SERVER_URL ?? `${location.origin}/colyseus`;
+export const SERVER_HTTP_URL =
+  import.meta.env.VITE_SERVER_URL ?? (import.meta.env.PROD ? location.origin : `${location.origin}/colyseus`);

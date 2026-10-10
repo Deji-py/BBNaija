@@ -31,6 +31,8 @@ interface TaskHooks {
   announce(text: string): void;
   /** Get a player up off whatever they're using (e.g. after finishing a dish). */
   standUp(player: Player): void;
+  /** A reward was just added to this player's perks. */
+  onReward(player: Player): void;
 }
 
 /**
@@ -105,7 +107,10 @@ export class TaskRunner {
     for (const id of winners) {
       task.winners.push(id);
       const player = this.state.players.get(id)!;
-      if (!player.perks.includes(task.reward)) player.perks.push(task.reward);
+      if (!player.perks.includes(task.reward)) {
+        player.perks.push(task.reward);
+        this.hooks.onReward(player);
+      }
     }
     for (const p of this.state.players.values()) p.cookStage = COOK_STAGE.start;
 

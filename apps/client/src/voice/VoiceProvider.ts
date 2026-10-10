@@ -22,3 +22,19 @@ export interface VoiceProvider {
   /** Where a remote player's voice comes from. */
   setSourcePosition(playerId: string, pos: Vec3): void;
 }
+
+/** How a remote voice is played. Kept as strings here so this file doesn't import the audio graph. */
+export type HearMode = "spatial" | "direct" | "muted";
+
+/**
+ * A VoiceProvider the house can route: who we send to, who we play, and
+ * peers coming and going. Both the mesh and LiveKit implement this.
+ */
+export interface RoutedVoice extends VoiceProvider {
+  addPeer(id: string): void;
+  removePeer(id: string): void;
+  /** Whether peer `id` may receive our mic. Cheap to call every frame. */
+  setSendAllowed(id: string, allowed: boolean): void;
+  peerIds(): string[];
+  setHearMode(id: string, mode: HearMode): void;
+}

@@ -11,6 +11,11 @@ export interface StateCallbacks {
   onRemove(collection: "players", cb: (player: PlayerView, id: string) => void): () => void;
   onChange(instance: PlayerView, cb: () => void): () => void;
   listen(property: "tvOn", cb: (value: boolean) => void): () => void;
+  listen(property: "tvChannel", cb: (value: string) => void): () => void;
+  listen(property: "tvMovie", cb: (value: string) => void): () => void;
+  listen(property: "theaterOn", cb: (value: boolean) => void): () => void;
+  listen(property: "tvStation", cb: (value: string) => void): () => void;
+  listen(property: "openDoors", cb: (value: string) => void): () => void;
   listen(property: "viewerCount", cb: (value: number) => void): () => void;
 }
 

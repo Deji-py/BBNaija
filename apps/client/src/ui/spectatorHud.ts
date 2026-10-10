@@ -1,23 +1,9 @@
-import { AREAS, HOUSE_CAMERAS, REACTIONS, type AreaId, type PlayerView, type Reaction } from "@bbn/shared";
+import { HOUSE_CAMERAS, REACTIONS, housemateStatus, type AreaId, type PlayerView, type Reaction } from "@bbn/shared";
 import type { CameraMode } from "../scene/spectatorCamera.js";
-
-const ACTIVITY_STATUS: Partial<Record<PlayerView["anim"], string>> = {
-  sleep: "Sleeping",
-  sit: "Sitting down",
-  cook: "Cooking",
-  workout: "Working out",
-  swim: "Swimming",
-  dance: "Dancing",
-  wave: "Waving",
-};
 
 /** One-line status for the housemate list, e.g. "Sleeping" or "Awake · Kitchen". */
 export function statusOf(p: PlayerView): string {
-  if (p.area === "diary") return "In the Diary Room";
-  const activity = ACTIVITY_STATUS[p.anim];
-  if (activity) return activity;
-  const area = AREAS.find((a) => a.id === p.area)?.label ?? "Outside";
-  return `Awake · ${area}`;
+  return housemateStatus(p);
 }
 
 /**
@@ -48,6 +34,7 @@ export class SpectatorHud {
     el.className = "spectator-hud";
     el.innerHTML = `
       <div class="spec-top">
+        <a class="hud-pill back-link" href="/" title="Browse other live houses">← All houses</a>
         <span class="live-badge">LIVE</span>
         <span class="hud-pill spec-count"></span>
         <span class="hud-pill spec-cam"></span>

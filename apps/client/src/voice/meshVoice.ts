@@ -7,7 +7,7 @@ import {
 } from "@bbn/shared";
 import type { HouseRoom } from "../net/connection.js";
 import type { SpatialAudio } from "./spatialAudio.js";
-import type { Vec3, VoiceProvider } from "./VoiceProvider.js";
+import type { HearMode, RoutedVoice, Vec3 } from "./VoiceProvider.js";
 
 /** Public STUN server: lets peers discover their public address when not on the same network. */
 const ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -35,7 +35,7 @@ interface Peer {
  * ICE candidates (network addresses) are gathered first and sent inside the
  * offer/answer ("non-trickle"), so each link needs just two messages.
  */
-export class MeshVoiceProvider implements VoiceProvider {
+export class MeshVoiceProvider implements RoutedVoice {
   private readonly peers = new Map<string, Peer>();
   private localTrack: MediaStreamTrack | null = null;
   private remoteStreamCb: ((id: string, stream: MediaStream) => void) | null = null;
@@ -114,6 +114,10 @@ export class MeshVoiceProvider implements VoiceProvider {
   /** Ids of everyone we have a connection with. */
   peerIds(): string[] {
     return [...this.peers.keys()];
+  }
+
+  setHearMode(id: string, mode: HearMode): void {
+    this.audio.setMode(id, mode);
   }
 
   get spatial(): SpatialAudio {

@@ -21,6 +21,10 @@ model User {
   sessions     Session[]
   applications Application[]
   housemates   Housemate[]
+  votes        Vote[]
+  purchases    Purchase[]
+  /// Seasons this user hosts (runs the Big Brother console for).
+  hostedSeasons Season[]    @relation("SeasonHost")
 }
 
 /// One-time sign-in links. Only a hash of the token is stored.
@@ -54,10 +58,17 @@ model Season {
   startsAt      DateTime?
   endsAt        DateTime?
   maxHousemates Int           @default(8)
+  /// The approved host who runs this season's house. Assigned by the platform admin.
+  hostUserId    String?
+  host          User?         @relation("SeasonHost", fields: [hostUserId], references: [id], onDelete: SetNull)
   createdAt     DateTime      @default(now())
   applications  Application[]
   housemates    Housemate[]
   events        EventLog[]
+  nominations   Nomination[]
+  voteWindows   VoteWindow[]
+  purchases     Purchase[]
+  watchSessions WatchSession[]
 }
 
 model Application {
@@ -93,9 +104,100 @@ model Housemate {
   /// active | evicted | winner | removed
   status    String    @default("active")
   evictedAt DateTime?
+  /// JSON array of reward ids (immunity, nomination power, crown). Survives a reconnect.
+  perks     String    @default("[]")
   createdAt DateTime  @default(now())
 
   @@unique([userId, seasonId])
+}
+
+/// One housemate's secret Diary Room nomination in a round.
+model Nomination {
+  id          String   @id @default(cuid())
+  seasonId    String
+  season      Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  round       Int
+  /// Account id, or "guest:<session>" for a development bot.
+  nominatorId String
+  /// Account id, or "guest:<session>" for a development bot.
+  nomineeId   String
+  createdAt   DateTime @default(now())
+
+  @@unique([seasonId, round, nominatorId, nomineeId])
+  @@index([seasonId, round])
+}
+
+/// A public voting window: viewers vote to save nominees, or (in the finale) to crown a winner.
+model VoteWindow {
+  id         String    @id @default(cuid())
+  seasonId   String
+  season     Season    @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  round      Int
+  /// save | finale
+  kind       String
+  opensAt    DateTime
+  closesAt   DateTime
+  /// JSON array of nominee identity keys. Results stay hidden until revealedAt is set.
+  nomineeIds String
+  revealedAt DateTime?
+  createdAt  DateTime  @default(now())
+  votes      Vote[]
+  purchases  Purchase[]
+
+  @@unique([seasonId, round])
+}
+
+/// One viewer's vote. Unique per window, so each account votes once. `paid` is for vote packs (M9).
+model Vote {
+  id           String     @id @default(cuid())
+  voteWindowId String
+  window       VoteWindow @relation(fields: [voteWindowId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Who the vote is for: account id, or "guest:<session>" for a development bot.
+  nomineeId    String
+  weight       Int        @default(1)
+  paid         Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+
+  @@unique([voteWindowId, userId])
+}
+
+/// A Paystack vote-pack checkout. `paid` rows add weight to that viewer's one vote.
+model Purchase {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seasonId     String
+  season       Season      @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  voteWindowId String?
+  window       VoteWindow? @relation(fields: [voteWindowId], references: [id], onDelete: SetNull)
+  packId       String
+  votes        Int
+  /// Paystack charges in kobo (100 kobo = ₦1).
+  amountKobo   Int
+  reference    String      @unique
+  /// pending | paid
+  status       String      @default("pending")
+  createdAt    DateTime    @default(now())
+  paidAt       DateTime?
+
+  @@index([userId, voteWindowId])
+}
+
+/// One viewer's time in the house. Closed when they leave. Anonymous viewers have no userId.
+model WatchSession {
+  id        String    @id @default(cuid())
+  seasonId  String
+  season    Season    @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  userId    String?
+  /// Colyseus session id, so leaving can close the right row.
+  sessionId String
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+
+  @@index([seasonId, startedAt])
+  @@index([sessionId])
 }
 
 model EventLog {

@@ -5,61 +5,67 @@ import {
   type ChatMessage,
   type ChatSendMessage,
   type ReactionMessage,
-  type ViewerWelcome,
+  type VoteAckMessage,
+  type HouseStateView,
+  type VoteMessage,
+  type GameErrorMessage,
+  type GameTableView,
+  type PartyEffectMessage,
 } from "@bbn/shared";
 import { setupScene } from "../scene/setupScene.js";
 import { buildHouse } from "../scene/house.js";
+import { PartyRoom } from "../scene/partyRoom.js";
+import { DayNight } from "../scene/dayNight.js";
 import { SpectatorCamera, type CameraMode } from "../scene/spectatorCamera.js";
 import { isTyping } from "../input/keyboard.js";
 import type { HouseRoom } from "../net/connection.js";
+import { moviePlaybackUrl } from "../net/movies.js";
+import { getSessionToken, paymentsApi } from "../net/api.js";
 import { getStateCallbacks } from "../net/stateCallbacks.js";
 import { ChatPanel } from "../ui/chat.js";
 import { showDisconnected } from "../ui/lobby.js";
 import { SpectatorHud, areaForKey } from "../ui/spectatorHud.js";
-import { MeshVoiceProvider } from "../voice/meshVoice.js";
+import { connectVoice } from "../voice/connectVoice.js";
 import { SpatialAudio } from "../voice/spatialAudio.js";
+import type { RoutedVoice } from "../voice/VoiceProvider.js";
 import { PlayersView } from "./playersView.js";
 import { applyVoiceRouting } from "../voice/voiceRouting.js";
 import { Banners } from "../ui/banner.js";
+import { RoundPanel, WinnerScreen } from "../ui/roundPanel.js";
 import { TaskPanel } from "../ui/taskPanel.js";
 import { GemsView } from "../scene/gems.js";
+import { PropsView } from "../scene/props.js";
+import { StationSigns } from "../scene/gameHall.js";
+import { GamePanel } from "../games/panel.js";
+import { LiveGamesList } from "../games/liveGames.js";
 
 /**
  * Spectator mode (/watch). There is no avatar: the viewer receives the same
  * live state as housemates and renders the house from it, so watching costs
  * no video encoding — just the game state and (for the first few viewers) audio.
  */
-export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audioCtx: AudioContext): void {
-  const { renderer, scene, camera } = setupScene(container);
+export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audioCtx: AudioContext, seasonId: string): void {
+  const { renderer, scene, camera, sun, hemi } = setupScene(container);
   const house = buildHouse();
   scene.add(house.root);
+  const dayNight = new DayNight(scene, sun, hemi, house.root);
+  const party = new PartyRoom(house.root, scene);
+  room.onMessage(Msg.partyEffect, ({ kind }: PartyEffectMessage) => party.play(kind));
   const cam = new SpectatorCamera(camera, house.cameraBlockers, renderer.domElement);
 
   // --- audio: receive-only links to every housemate, heard from the camera ---
-  let voice: MeshVoiceProvider | null = null;
+  let voice: RoutedVoice | null = null;
   const $ = getStateCallbacks(room);
 
-  // The server tells us right after joining whether we got an audio slot.
-  // Until then (and if not), PlayersView runs without voice. A viewer always
-  // makes the offer: housemates don't know who's watching.
-  const voiceReady = new Promise<MeshVoiceProvider | null>((resolve) => {
-    room.onMessage(Msg.viewerWelcome, ({ audio }: ViewerWelcome) => {
-      if (!audio) {
-        hud.setAudioStatus("🔇 Audio is full for now — more listeners coming soon", false);
-        return resolve(null);
-      }
-      const v = new MeshVoiceProvider(room, new SpatialAudio(audioCtx), () => true);
-      v.join(null);
-      hud.setAudioStatus("🔊 Live audio — you hear what the camera hears", true);
-      resolve(v);
-    });
-  });
-
   const players = new PlayersView(scene, room, $, null);
-  void voiceReady.then((v) => {
-    voice = v;
-    if (v) players.setVoice(v);
-  });
+  const props = new PropsView(scene, room, (id) => players.avatarOf(id));
+
+  // --- games hall: viewers can watch any game in progress ---
+  const stationSigns = new StationSigns(scene);
+  const gamePanel = new GamePanel(container, { send: (type, message) => room.send(type, message), canPlay: false });
+  room.onMessage(Msg.gameTable, (table: GameTableView) => gamePanel.onTable(table));
+  room.onMessage(Msg.gameError, (msg: GameErrorMessage) => gamePanel.onError(msg));
+  const liveGames = new LiveGamesList(container, (id) => gamePanel.open(id));
 
   // --- HUD ---
   let following: string | null = null;
@@ -86,8 +92,39 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
   });
   hud.setCamera(cam.mode);
   hud.setAudioStatus("Connecting audio…", true);
+  // A viewer never sends audio. Mesh viewers past the listen cap get silence;
+  // LiveKit viewers all subscribe.
+  void connectVoice(room, new SpatialAudio(audioCtx), () => true, null).then(({ voice: v, grant }) => {
+    voice = v;
+    if (v) players.setVoice(v);
+    if (!v) {
+      hud.setAudioStatus(
+        grant.provider === "livekit" ? "🔇 Couldn't open live audio" : "🔇 Audio is full for now — more listeners coming soon",
+        false,
+      );
+      return;
+    }
+    hud.setAudioStatus("🔊 Live audio — you hear what the camera hears", true);
+  });
   $.listen("viewerCount", (n) => hud.setViewerCount(n));
-  $.listen("tvOn", (on) => house.tv.setOn(on));
+  house.tv.attach(audioCtx);
+  party.attach(audioCtx);
+  const syncTv = () => {
+    const state = room.state as HouseStateView;
+    house.tv.setChannel(state.tvChannel, moviePlaybackUrl(seasonId, state.tvChannel, state.tvMovie));
+    house.tv.setOn(state.tvOn);
+    house.tv.setStation(state.tvStation);
+    house.tv.setTheater(state.theaterOn);
+  };
+  $.listen("tvOn", syncTv);
+  $.listen("tvChannel", syncTv);
+  $.listen("tvMovie", syncTv);
+  $.listen("theaterOn", syncTv);
+  $.listen("tvStation", syncTv);
+  syncTv();
+  const syncDoors = () => house.doors.setOpen((room.state as HouseStateView).openDoors ?? "");
+  $.listen("openDoors", syncDoors);
+  syncDoors();
 
   // If the housemate we follow leaves, fall back to the lounge camera.
   $.onRemove("players", (_p, id) => {
@@ -115,6 +152,29 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
 
   // Big Brother: announcements, tasks (watch only), Diary Room transcript when it's broadcast.
   const banners = new Banners(container);
+  const roundPanel = new RoundPanel(container, {
+    canVote: true,
+    signedIn: !!getSessionToken(),
+    onVote: (token) => {
+      const message: VoteMessage = { token };
+      room.send(Msg.vote, message);
+    },
+  });
+  room.onMessage(Msg.voteAck, ({ ok, text, token }: VoteAckMessage) => roundPanel.setVoteResult(ok, text, token));
+  if (getSessionToken() && seasonId) {
+    void paymentsApi.config().then((cfg) => {
+      if (!cfg.enabled) return;
+      roundPanel.setPacks(cfg.packs, (packId) => {
+        void paymentsApi.checkout(packId, seasonId).then(
+          (url) => {
+            location.href = url;
+          },
+          (err) => roundPanel.setVoteResult(false, err instanceof Error ? err.message : "Couldn't start the payment.", ""),
+        );
+      });
+    }).catch(() => {});
+  }
+  const winner = new WinnerScreen(container);
   const taskPanel = new TaskPanel(container, {});
   const gems = new GemsView(scene);
   room.onMessage(Msg.announcement, ({ text, to }: AnnouncementMessage) => {
@@ -153,6 +213,9 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);
     players.update(dt);
+    props.update(dt);
+    stationSigns.update(room.state);
+    liveGames.update(room.state);
 
     const target = following ? players.remotes.get(following)?.avatar.root : undefined;
     cam.update(dt, target ? { x: target.position.x, z: target.position.z, rotY: target.rotation.y } : undefined);
@@ -161,6 +224,8 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
 
     hud.setHousemates([...(room.state.players?.entries() ?? [])], following);
     if (voice) applyVoiceRouting(voice, room.sessionId, room.state);
+    roundPanel.update(room.state);
+    winner.update(room.state);
     taskPanel.update(room.state);
     gems.update(dt, room.state.task);
 
@@ -181,6 +246,11 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
       );
     }
     house.tv.animate(dt);
+    house.doors.animate(dt);
+    dayNight.update((room.state as HouseStateView).dayMinutes ?? 600);
+    house.lights.set((room.state as HouseStateView).lightsOff ?? "");
+    party.update(dt, !!(room.state as HouseStateView).partyOn);
+    house.setShowers(new Set([...(room.state.players?.values() ?? [])].map((p) => p.activity).filter((a) => a.startsWith("shower-"))));
     renderer.render(scene, camera);
   });
 }

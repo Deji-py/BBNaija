@@ -11,9 +11,9 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 /**
- * "Season" tab of the Big Brother console: create seasons, move them through
- * draft → applications → live → ended, and review applicants. Talks to the
- * HTTP admin API with the console's secret.
+ * Season management: create seasons and assign hosts (platform admin only),
+ * move a season through draft → applications → live → ended, and review its
+ * applicants. Hosts only ever see the seasons they host — the server enforces it.
  */
 export class SeasonAdmin {
   private readonly el: HTMLElement;
@@ -22,18 +22,26 @@ export class SeasonAdmin {
   private readonly errorEl: HTMLElement;
   private readonly filterEl: HTMLSelectElement;
   private seasons: AdminSeason[] = [];
+  private platformAdmin = false;
   private selectedSeason: string | null = null;
+  private readonly createForm: HTMLFormElement;
 
-  constructor(parent: HTMLElement, private readonly api: AdminApi) {
+  constructor(
+    parent: HTMLElement,
+    private readonly api: AdminApi,
+    /** When given, each season gets an "Open console" button. */
+    private readonly onOpenConsole?: (season: AdminSeason) => void,
+  ) {
     this.el = document.createElement("div");
     this.el.className = "season-admin";
     this.el.innerHTML = `
       <section>
         <h2>Seasons</h2>
         <ul class="season-list"></ul>
-        <form class="new-season">
+        <form class="new-season" hidden>
           <input name="name" placeholder="New season name" maxlength="${LIMITS.seasonName}" required />
           <input name="max" type="number" min="2" max="8" value="8" aria-label="Max housemates" title="Max housemates" />
+          <input name="host" type="email" placeholder="Host's email (optional)" maxlength="${LIMITS.email}" />
           <button type="submit">Create</button>
         </form>
         <p class="error admin-error" role="alert"></p>
@@ -54,12 +62,14 @@ export class SeasonAdmin {
     this.filterEl.addEventListener("change", () => void this.loadApplicants());
 
     const form = this.el.querySelector<HTMLFormElement>(".new-season")!;
+    this.createForm = form;
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       const name = (form.elements.namedItem("name") as HTMLInputElement).value.trim();
       const max = Number((form.elements.namedItem("max") as HTMLInputElement).value);
+      const host = (form.elements.namedItem("host") as HTMLInputElement).value.trim();
       void this.run(async () => {
-        await this.api.createSeason(name, max);
+        await this.api.createSeason(name, max, host);
         form.reset();
       });
     });
@@ -69,8 +79,16 @@ export class SeasonAdmin {
       if (select) void this.run(() => this.api.setSeasonStatus(select.dataset.season!, select.value));
     });
     this.seasonsEl.addEventListener("click", (e) => {
-      const li = (e.target as HTMLElement).closest<HTMLElement>("li[data-season]");
-      if (!li || (e.target as HTMLElement).closest("select")) return;
+      const target = e.target as HTMLElement;
+      const li = target.closest<HTMLElement>("li[data-season]");
+      if (!li || target.closest("select")) return;
+      const season = this.seasons.find((s) => s.id === li.dataset.season);
+      if (target.closest("[data-open]") && season) return this.onOpenConsole?.(season);
+      if (target.closest("[data-host]") && season) {
+        const email = prompt(`Host's email for ${season.name} (leave empty to remove the host):`, season.hostEmail);
+        if (email !== null) void this.run(() => this.api.setHost(season.id, email.trim()));
+        return;
+      }
       this.selectedSeason = li.dataset.season!;
       this.renderSeasons();
       void this.loadApplicants();
@@ -87,7 +105,10 @@ export class SeasonAdmin {
   /** Reload everything (also call when the tab is shown). */
   async refresh(): Promise<void> {
     try {
-      this.seasons = await this.api.seasons();
+      const res = await this.api.seasons();
+      this.seasons = res.seasons;
+      this.platformAdmin = res.platformAdmin;
+      this.createForm.hidden = !this.platformAdmin;
       if (!this.selectedSeason || !this.seasons.some((s) => s.id === this.selectedSeason)) {
         this.selectedSeason = this.seasons.find((s) => s.status === "applications" || s.status === "live")?.id ?? this.seasons[0]?.id ?? null;
       }
@@ -118,9 +139,28 @@ export class SeasonAdmin {
         name.textContent = s.name;
         const meta = document.createElement("small");
         meta.textContent = `${s.selectedCount}/${s.maxHousemates} selected · ${s.applicationCount} applied`;
+        const hostLine = document.createElement("small");
+        hostLine.textContent = s.hostEmail ? `Host: ${s.hostEmail}` : "No host yet";
         const info = document.createElement("span");
         info.className = "who";
-        info.append(name, meta);
+        info.append(name, meta, hostLine);
+        const buttons = document.createElement("span");
+        buttons.className = "season-buttons";
+        if (this.platformAdmin) {
+          const hostBtn = document.createElement("button");
+          hostBtn.type = "button";
+          hostBtn.dataset.host = "";
+          hostBtn.textContent = "Host…";
+          buttons.append(hostBtn);
+        }
+        if (this.onOpenConsole && s.status !== "ended") {
+          const open = document.createElement("button");
+          open.type = "button";
+          open.dataset.open = "";
+          open.className = "primary";
+          open.textContent = "Open console";
+          buttons.append(open);
+        }
         const select = document.createElement("select");
         select.dataset.season = s.id;
         select.setAttribute("aria-label", `Status of ${s.name}`);
@@ -131,14 +171,14 @@ export class SeasonAdmin {
           o.selected = st === s.status;
           select.append(o);
         }
-        li.append(info, select);
+        li.append(info, select, buttons);
         return li;
       }),
     );
     if (!this.seasons.length) {
       const li = document.createElement("li");
       li.className = "empty";
-      li.textContent = "No seasons yet — create one below.";
+      li.textContent = this.platformAdmin ? "No seasons yet — create one below." : "You don't host any seasons yet. Ask the platform admin to assign you one.";
       this.seasonsEl.append(li);
     }
   }
