@@ -264,6 +264,7 @@ export function startAdminMode(
     banners.setStatus("talking", talking === "house" ? "📣 You're on air to the whole house" : talking === "diary" ? "🎙️ Talking to the Diary Room" : null, "live");
     house.tv.animate(dt);
     house.doors.animate(dt);
+    house.guards.animate(dt);
     dayNight.update((room.state as HouseStateView).dayMinutes ?? 600);
     house.lights.set((room.state as HouseStateView).lightsOff ?? "");
     party.update(dt, !!(room.state as HouseStateView).partyOn);

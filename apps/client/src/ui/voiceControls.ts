@@ -124,9 +124,9 @@ export class VoiceControls {
           ? "Talking…"
           : "Hold V to talk"
         : "Mic on";
-    this.muteBtn.textContent = this.muted ? "Unmute (M)" : "Mute (M)";
+    setButton(this.muteBtn, this.muted ? "🔇" : "🎙️", this.muted ? "Unmute" : "Mute", "M");
     this.muteBtn.classList.toggle("active", this.muted);
-    this.modeBtn.textContent = this.mode === "open" ? "Open mic" : "Push-to-talk";
+    setButton(this.modeBtn, this.mode === "open" ? "📢" : "✋", this.mode === "open" ? "Open mic" : "Push-to-talk");
   }
 
   private persist(): void {
@@ -136,6 +136,13 @@ export class VoiceControls {
       // Storage unavailable; the choice just won't be remembered.
     }
   }
+}
+
+/** Icon + label + shortcut; small screens hide the label, so it's also the accessible name. */
+function setButton(button: HTMLButtonElement, icon: string, label: string, key?: string): void {
+  button.setAttribute("aria-label", label);
+  button.title = key ? `${label} (${key})` : label;
+  button.innerHTML = `<span class="vc-icon" aria-hidden="true">${icon}</span><span class="vc-label">${label}</span>${key ? `<kbd>${key}</kbd>` : ""}`;
 }
 
 function load(): Saved {

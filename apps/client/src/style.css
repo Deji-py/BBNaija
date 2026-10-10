@@ -805,7 +805,7 @@ canvas:active {
 .chat.diary-chat {
   left: auto;
   right: 16px;
-  bottom: 110px;
+  bottom: 144px;
   width: min(320px, calc(100% - 32px));
   padding: 10px;
   border-radius: 12px;
@@ -2583,48 +2583,119 @@ canvas:active {
   display: none;
 }
 
-/* --- Emote wheel (hold Q) --- */
+/* --- Emote wheel (hold Q, or the 😀 button): two rings round a glass disc --- */
 .emote-wheel {
   position: absolute;
   top: 50%;
   left: 50%;
   z-index: 6;
-  width: 380px;
-  height: 380px;
+  width: min(400px, 92vw, 92vh);
+  aspect-ratio: 1;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: radial-gradient(circle, rgb(15 15 25 / 0.55) 0 30%, rgb(15 15 25 / 0.82) 31% 70%, transparent 71%);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  background:
+    radial-gradient(circle, transparent 0 32%, rgb(255 255 255 / 0.1) 32.4% 33%, transparent 33.4%),
+    radial-gradient(circle, rgb(20 16 36 / 0.62) 0 24%, rgb(14 12 24 / 0.72) 24% 100%);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 0.45), inset 0 0 0 1px rgb(255 255 255 / 0.04);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  backdrop-filter: blur(16px) saturate(1.3);
   pointer-events: auto;
+  touch-action: none;
+  animation: emote-pop 0.14s ease-out;
 }
 .emote-wheel[hidden] {
   display: none;
 }
-.emote-wheel-label {
+@keyframes emote-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.88);
+  }
+}
+.emote-wheel-centre {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 110px;
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  width: 30%;
   transform: translate(-50%, -50%);
   color: #fff;
-  font-weight: 700;
-  font-size: 13px;
   text-align: center;
+  pointer-events: none;
+}
+.emote-wheel-icon {
+  font-size: 34px;
+  line-height: 1;
+}
+.emote-wheel-icon:empty {
+  display: none;
+}
+.emote-wheel-label {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--hud-muted, #c8c5d8);
+}
+.emote-wheel-icon:not(:empty) + .emote-wheel-label {
+  color: #fff;
+  font-size: 13px;
 }
 .emote-item {
   position: absolute;
+  display: grid;
+  place-items: center;
+  width: 13.5%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.07);
+  font-size: clamp(19px, 5.4vmin, 24px);
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.1s ease, box-shadow 0.1s ease;
+}
+.emote-item.inner {
+  width: 15%;
+  background: rgb(255 255 255 / 0.11);
+  font-size: clamp(21px, 6vmin, 27px);
+}
+.emote-item.active,
+.emote-item:focus-visible {
+  outline: none;
+  background: linear-gradient(135deg, #8b7cf8, #5b4bd6);
+  box-shadow: 0 0 0 3px rgb(139 124 248 / 0.35), 0 6px 18px rgb(91 75 214 / 0.5);
+  transform: translate(-50%, -50%) scale(1.22);
+}
+@media (hover: hover) {
+  .emote-item:hover {
+    background: rgb(255 255 255 / 0.18);
+  }
+}
+.emote-toggle {
+  position: absolute;
+  right: var(--hud-right, 16px);
+  bottom: calc(var(--hud-bottom, 16px) + 84px);
+  z-index: 5;
+  display: grid;
+  place-items: center;
   width: 44px;
   height: 44px;
-  transform: translate(-50%, -50%);
-  border: 0;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 0.12);
   border-radius: 50%;
-  background: #2a2640;
+  background: rgb(14 12 24 / 0.52);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.25);
+  -webkit-backdrop-filter: blur(14px) saturate(1.25);
+  backdrop-filter: blur(14px) saturate(1.25);
   font-size: 22px;
   cursor: pointer;
-  transition: transform 0.08s ease, background 0.08s ease;
 }
-.emote-item.active {
-  background: #7b6cf6;
-  transform: translate(-50%, -50%) scale(1.2);
+.emote-toggle[aria-expanded="true"] {
+  background: linear-gradient(135deg, #8b7cf8, #5b4bd6);
 }
 .tv-panel.dj-panel {
   top: 88px;
@@ -2634,4 +2705,902 @@ canvas:active {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+/* --- In-game HUD: glass chips around the edges, live chat feed, nothing over the middle --- */
+:root {
+  --hud-glass: rgb(14 12 24 / 0.52);
+  --hud-glass-strong: rgb(18 16 30 / 0.88);
+  --hud-line: rgb(255 255 255 / 0.12);
+  --hud-muted: #c8c5d8;
+  --hud-accent: linear-gradient(135deg, #8b7cf8, #5b4bd6);
+  --hud-live: #2fbf71;
+  --hud-danger: #e5484d;
+  --hud-shadow: 0 8px 28px rgb(0 0 0 / 0.25);
+  --hud-blur: blur(14px) saturate(1.25);
+  --hud-top: max(12px, env(safe-area-inset-top));
+  --hud-right: max(12px, env(safe-area-inset-right));
+  --hud-bottom: max(12px, env(safe-area-inset-bottom));
+  --hud-left: max(12px, env(safe-area-inset-left));
+}
+
+.hud-top-left,
+.hud-help,
+.voice-status,
+.voice-buttons button,
+.hud-prompt,
+.needs-panel,
+.task-panel,
+.round-panel,
+.spec-housemates,
+.spec-cams button,
+.spec-react button,
+.spec-drawer-toggle {
+  border: 1px solid var(--hud-line);
+  background: var(--hud-glass);
+  box-shadow: var(--hud-shadow);
+  -webkit-backdrop-filter: var(--hud-blur);
+  backdrop-filter: var(--hud-blur);
+}
+
+/* Top-left: one segmented status bar (area · count · clock). */
+.hud-top-left {
+  top: var(--hud-top);
+  left: var(--hud-left);
+  max-width: calc(100% - var(--hud-left) - 120px);
+  flex-wrap: nowrap;
+  gap: 0;
+  padding: 3px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.hud-top-left .hud-pill {
+  flex: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: none;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.hud-top-left .hud-pill + .hud-pill:not([hidden]) {
+  box-shadow: inset 1px 0 0 var(--hud-line);
+  border-radius: 0;
+}
+.hud-top-left .hud-area {
+  background: var(--hud-accent);
+  text-shadow: none;
+}
+.hud-count,
+.hud-clock {
+  color: var(--hud-muted);
+  font-weight: 600;
+}
+
+/* Top-right: FPS readout and the "?" controls card. */
+.hud-fps {
+  top: calc(var(--hud-top) + 12px);
+  right: calc(var(--hud-right) + 52px);
+  opacity: 0.6;
+}
+.hud-help {
+  top: var(--hud-top);
+  right: var(--hud-right);
+  bottom: auto;
+  left: auto;
+  z-index: 7;
+  max-width: min(300px, calc(100% - 24px));
+  padding: 0;
+  border-radius: 999px;
+  pointer-events: auto;
+  font-size: 13px;
+}
+.hud-help summary {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+}
+.hud-help summary::-webkit-details-marker {
+  display: none;
+}
+.hud-help[open] {
+  border-radius: 16px;
+  background: var(--hud-glass-strong);
+}
+.hud-help[open] summary {
+  width: auto;
+  justify-items: end;
+  padding: 0 15px;
+  font-size: 0;
+}
+.hud-help[open] summary::after {
+  content: "Close ✕";
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hud-muted);
+}
+.hud-help:not([open]) .hud-help-copy {
+  display: none;
+}
+.hud-help-copy {
+  padding: 0 15px 13px;
+  color: var(--hud-muted);
+  line-height: 1.55;
+}
+
+/* Interaction prompt: low centre, under the avatar's feet. */
+.hud-prompt {
+  bottom: 22%;
+  padding: 7px 16px 7px 8px;
+  background: var(--hud-glass-strong);
+  font-size: 14px;
+  font-weight: 600;
+  text-shadow: none;
+}
+.hud-prompt kbd {
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+/* Needs: under the status bar. */
+.needs-panel {
+  top: calc(var(--hud-top) + 50px);
+  left: var(--hud-left);
+  border-radius: 16px;
+}
+.needs-panel.folded {
+  width: max-content;
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+.needs-panel.folded .needs-mood {
+  margin: 0;
+  font-size: 13px;
+}
+.task-panel {
+  top: calc(var(--hud-top) + 50px);
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 16px;
+}
+
+/* Voice: bottom-right status chip and pill buttons. */
+.voice-controls {
+  right: var(--hud-right);
+  bottom: var(--hud-bottom);
+}
+.voice-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.voice-controls.live .voice-status {
+  border-color: rgb(47 191 113 / 0.6);
+  background: rgb(47 191 113 / 0.85);
+}
+.voice-controls.live .voice-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fff;
+  animation: hud-pulse 1.4s ease-in-out infinite;
+}
+.voice-controls.forced .voice-status,
+.voice-controls.no-mic .voice-status {
+  background: rgb(160 50 60 / 0.85);
+}
+.voice-buttons button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.voice-buttons button:hover {
+  border-color: rgb(255 255 255 / 0.28);
+}
+.voice-buttons button.active {
+  border-color: rgb(229 72 77 / 0.7);
+  background: rgb(229 72 77 / 0.85);
+}
+.vc-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.voice-buttons kbd {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgb(255 255 255 / 0.14);
+  font: 600 11px ui-monospace, monospace;
+}
+@keyframes hud-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Live chat feed (housemates, and viewers' house/viewer chat). */
+.chat-input {
+  min-height: 40px;
+  box-sizing: border-box;
+  border: 1px solid var(--hud-line);
+  border-radius: 999px;
+  padding: 8px 15px;
+  background: var(--hud-glass);
+  color: #fff;
+  font-size: 14px;
+  -webkit-backdrop-filter: var(--hud-blur);
+  backdrop-filter: var(--hud-blur);
+}
+.chat-input::placeholder {
+  color: rgb(232 229 245 / 0.7);
+}
+.chat.typing .chat-input {
+  border-color: #8b7cf8;
+  background: var(--hud-glass-strong);
+}
+
+.chat.live {
+  left: var(--hud-left);
+  bottom: var(--hud-bottom);
+  width: min(340px, calc(100% - var(--hud-left) - 210px));
+  /* The feed never blocks the scene: only the input takes taps. */
+  pointer-events: none;
+}
+.chat.live .chat-form {
+  pointer-events: auto;
+}
+.chat.live .chat-input {
+  width: min(230px, 100%);
+  transition: width 0.2s ease, background 0.2s ease;
+}
+.chat.live.typing .chat-input {
+  width: 100%;
+}
+.chat.live .chat-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  max-height: min(240px, 34dvh);
+  overflow: hidden;
+  font-size: 14px;
+  text-shadow: none;
+  mask-image: linear-gradient(to bottom, transparent, #000 36px);
+}
+.chat.live .chat-list li {
+  flex: none;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 5px 11px;
+  border-radius: 14px;
+  background: rgb(10 8 20 / 0.5);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  line-height: 1.35;
+  animation: chat-pop 0.28s ease-out;
+  transition: opacity 0.9s ease, transform 0.9s ease;
+}
+.chat.live .chat-list li.faded {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+.chat.live.typing .chat-list {
+  overflow-y: auto;
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+.chat.live.typing .chat-list li.faded {
+  opacity: 0.9;
+  transform: none;
+  transition-duration: 0.2s;
+}
+@keyframes chat-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+}
+
+/* Banners sit just above the live feed / prompt, centred. */
+.banners {
+  bottom: calc(22% + 52px);
+}
+
+/* --- Spectator HUD --- */
+.spec-top {
+  top: var(--hud-top);
+  left: var(--hud-left);
+}
+.spec-top .hud-pill {
+  border: 1px solid var(--hud-line);
+  background: var(--hud-glass);
+  -webkit-backdrop-filter: var(--hud-blur);
+  backdrop-filter: var(--hud-blur);
+}
+.live-badge {
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.16), 0 6px 18px rgb(224 36 59 / 0.34);
+}
+.spec-audio {
+  top: calc(var(--hud-top) + 46px);
+  left: var(--hud-left);
+  max-width: min(420px, calc(100% - 32px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spec-right {
+  top: var(--hud-top);
+  right: var(--hud-right);
+  bottom: calc(60px + var(--hud-bottom));
+  width: 280px;
+}
+.spec-housemates {
+  border-radius: 16px;
+}
+.spec-housemates li {
+  min-height: 38px;
+  box-sizing: border-box;
+}
+.spec-housemates li.following {
+  background: var(--hud-accent);
+}
+.spec-cams {
+  bottom: var(--hud-bottom);
+}
+.spec-cams button,
+.spec-react button,
+.spec-drawer-toggle {
+  min-height: 40px;
+  border-radius: 999px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.spec-cams button:hover,
+.spec-react button:hover,
+.spec-drawer-toggle:hover {
+  border-color: rgb(255 255 255 / 0.28);
+}
+.spec-cams button.active {
+  border-color: rgb(190 182 255 / 0.8);
+  background: var(--hud-accent);
+}
+.spec-drawer-toggle {
+  display: none;
+  color: #fff;
+  font: 700 13px system-ui, sans-serif;
+  cursor: pointer;
+}
+.chat.live.house-chat {
+  bottom: calc(60px + var(--hud-bottom));
+  width: min(320px, calc(50% - 24px));
+}
+.spec-right > .chat.live.viewer-chat {
+  width: 100%;
+  pointer-events: none;
+}
+.spec-right > .chat.live.viewer-chat .chat-list {
+  align-items: flex-end;
+}
+.spec-right > .chat.live.viewer-chat .chat-input {
+  width: 100%;
+}
+
+/* Viewers: live captions (what the house doesn't know) stacked over games in progress. */
+.spec-left {
+  position: absolute;
+  top: calc(var(--hud-top) + 82px);
+  left: var(--hud-left);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: min(360px, calc(100% - 340px));
+  pointer-events: none;
+}
+.spec-left > .live-games {
+  position: static;
+  pointer-events: auto;
+}
+.captions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+}
+.caption {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
+  padding: 8px 12px 8px 10px;
+  border: 1px solid var(--hud-line);
+  border-left: 3px solid var(--hud-danger);
+  border-radius: 4px 12px 12px 4px;
+  background: var(--hud-glass-strong);
+  box-shadow: var(--hud-shadow);
+  -webkit-backdrop-filter: var(--hud-blur);
+  backdrop-filter: var(--hud-blur);
+  color: #fff;
+  font: 600 13px/1.35 system-ui, sans-serif;
+  text-align: left;
+  pointer-events: auto;
+  animation: caption-in 0.25s ease-out;
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+button.caption {
+  cursor: pointer;
+}
+button.caption:hover {
+  border-color: rgb(255 255 255 / 0.28);
+  border-left-color: var(--hud-danger);
+}
+.caption.faded {
+  opacity: 0;
+  transform: translateX(-8px);
+}
+.caption-icon {
+  flex: none;
+  font-size: 15px;
+  line-height: 1.2;
+}
+@keyframes caption-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+}
+
+/* --- Phones and small windows --- */
+@media (max-width: 700px), (max-height: 560px) {
+  .hud-top-left {
+    max-width: calc(100% - var(--hud-left) - var(--hud-right) - 50px);
+  }
+  .hud-top-left .hud-pill {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+  .hud-fps {
+    display: none;
+  }
+  .hud-help summary {
+    width: 38px;
+    height: 38px;
+  }
+
+  /* Second row: needs on the left, the "Press E" prompt on the right. */
+  .needs-panel {
+    top: calc(var(--hud-top) + 44px);
+    width: min(230px, calc(100% - 24px));
+    box-sizing: border-box;
+  }
+  .hud-prompt {
+    top: calc(var(--hud-top) + 44px);
+    right: var(--hud-right);
+    bottom: auto;
+    left: auto;
+    max-width: calc(100% - var(--hud-left) - var(--hud-right) - 150px);
+    box-sizing: border-box;
+    padding: 5px 12px 5px 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transform: none;
+    font-size: 12px;
+  }
+  .task-panel {
+    top: calc(var(--hud-top) + 86px);
+    left: var(--hud-left);
+    transform: none;
+    width: min(300px, calc(100% - 24px));
+    max-height: 28dvh;
+    overflow: auto;
+    font-size: 12px;
+  }
+
+  .voice-controls {
+    gap: 5px;
+  }
+  .voice-status {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+  }
+  .voice-controls.no-mic .voice-status {
+    max-width: 200px;
+    white-space: normal;
+  }
+  .voice-buttons button {
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+  .vc-label,
+  .voice-buttons kbd {
+    display: none;
+  }
+
+  .chat.live {
+    width: calc(100% - var(--hud-left) - var(--hud-right) - 110px);
+    max-width: 320px;
+  }
+  .chat.live .chat-list {
+    max-height: min(170px, 26dvh);
+    font-size: 13px;
+  }
+  .chat.live .chat-list li {
+    padding: 4px 10px;
+  }
+  .chat.live .chat-input {
+    min-height: 44px;
+    width: 100%;
+    font-size: 16px; /* below 16px iOS zooms the page on focus */
+  }
+
+  .chat.diary-chat {
+    right: var(--hud-right);
+    bottom: calc(140px + var(--hud-bottom));
+    width: min(300px, calc(100% - 24px));
+    box-sizing: border-box;
+  }
+  .round-panel {
+    top: auto;
+    bottom: calc(60px + var(--hud-bottom));
+    width: min(420px, calc(100% - 24px));
+    max-height: 46dvh;
+    overflow-y: auto;
+  }
+  .banners {
+    top: calc(var(--hud-top) + 86px);
+    bottom: auto;
+    flex-direction: column;
+    width: min(460px, calc(100% - 24px));
+  }
+  .announcement {
+    padding: 9px 12px;
+  }
+  .announcement-text {
+    font-size: 15px;
+  }
+
+  .spec-top {
+    right: var(--hud-right);
+    gap: 5px;
+    max-width: none;
+  }
+  .spec-top .hud-pill,
+  .live-badge {
+    padding: 6px 8px;
+    font-size: 11px;
+  }
+  .spec-top .back-link {
+    max-width: 78px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .spec-cam {
+    order: 5;
+    width: 100%;
+    max-width: calc(100vw - 24px);
+    box-sizing: border-box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .spec-drawer-toggle {
+    display: block;
+    min-height: 34px;
+    padding: 5px 10px;
+  }
+  .admin-mode .spec-drawer-toggle {
+    display: none;
+  }
+  .spec-audio {
+    top: calc(var(--hud-top) + 76px);
+    max-width: calc(100% - 24px);
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+  .spec-right {
+    display: none;
+    top: calc(var(--hud-top) + 112px);
+    right: var(--hud-right);
+    bottom: calc(64px + var(--hud-bottom));
+    width: min(330px, calc(100% - 24px));
+    padding: 8px;
+    border: 1px solid var(--hud-line);
+    border-radius: 16px;
+    background: var(--hud-glass-strong);
+    box-shadow: 0 18px 60px rgb(0 0 0 / 0.42);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    box-sizing: border-box;
+    z-index: 8;
+  }
+  .spec-right.open {
+    display: flex;
+  }
+  .spec-housemates {
+    max-height: 42%;
+    background: rgb(255 255 255 / 0.04);
+    box-shadow: none;
+  }
+  .spec-right > .spec-floats {
+    display: none;
+  }
+  .spec-right > .chat.live.viewer-chat {
+    width: 100%;
+    min-height: 0;
+  }
+  .spec-react {
+    justify-content: center;
+    overflow-x: auto;
+  }
+  .spec-react button {
+    min-width: 42px;
+    min-height: 42px;
+  }
+  .spec-cams {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-width: none;
+    transform: none;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 7px;
+    padding: 8px var(--hud-right) calc(8px + env(safe-area-inset-bottom)) var(--hud-left);
+    overflow-x: auto;
+    background: linear-gradient(to top, rgb(5 5 10 / 0.7), transparent);
+    scrollbar-width: none;
+  }
+  .spec-cams::-webkit-scrollbar {
+    display: none;
+  }
+  .spec-cams button {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 8px 12px;
+  }
+  .spec-cams kbd {
+    display: none;
+  }
+  .chat.live.house-chat {
+    bottom: calc(64px + var(--hud-bottom));
+    width: min(300px, calc(100% - 24px));
+  }
+  .spectator-hud ~ .chat.diary-chat {
+    bottom: calc(64px + var(--hud-bottom));
+    width: calc(100% - 24px);
+  }
+  .spec-left {
+    top: calc(var(--hud-top) + 104px);
+    width: min(320px, calc(100% - 24px));
+  }
+  .caption {
+    padding: 6px 10px 6px 8px;
+    font-size: 12px;
+  }
+  .captions .caption:nth-last-child(n + 3) {
+    display: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .hud-count,
+  .spec-count {
+    display: none;
+  }
+  .quiz-card,
+  .nomination-card {
+    top: 50%;
+    width: calc(100% - 24px);
+    max-height: calc(100dvh - 100px);
+    overflow-y: auto;
+  }
+}
+
+@media (hover: none) {
+  .voice-buttons kbd {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat.live .chat-list li,
+  .voice-controls.live .voice-status::before,
+  .emote-wheel,
+  .caption {
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .hud-top-left,
+  .hud-help,
+  .voice-status,
+  .voice-buttons button,
+  .hud-prompt,
+  .needs-panel,
+  .task-panel,
+  .round-panel,
+  .spec-housemates,
+  .spec-cams button,
+  .spec-react button,
+  .spec-drawer-toggle,
+  .chat-input,
+  .chat.live .chat-list li,
+  .emote-toggle,
+  .emote-wheel {
+    background: #1b1928;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+.spec-cams .auto-cam.active {
+  box-shadow: 0 0 0 2px rgb(139 124 248 / 0.45), var(--hud-shadow);
+}
+
+/* --- Touch screens: thumbstick, jump, and a tappable "use" prompt within thumb reach --- */
+.hud-prompt:not(.unavailable) {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.touch-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.touch-stick,
+.touch-jump {
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.touch-stick {
+  position: absolute;
+  left: calc(var(--hud-left) + 4px);
+  bottom: calc(var(--hud-bottom) + 6px);
+  width: 128px;
+  aspect-ratio: 1;
+  border: 1px solid var(--hud-line);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(255 255 255 / 0.06) 0 34%, var(--hud-glass) 35%);
+  box-shadow: var(--hud-shadow);
+  -webkit-backdrop-filter: var(--hud-blur);
+  backdrop-filter: var(--hud-blur);
+}
+.touch-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 40%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.82);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
+  transition: background 0.15s ease;
+}
+.touch-stick.active .touch-knob {
+  background: #fff;
+}
+.touch-stick.running {
+  border-color: rgb(139 124 248 / 0.8);
+}
+.touch-stick.running .touch-knob {
+  background: linear-gradient(135deg, #8b7cf8, #5b4bd6);
+}
+.touch-jump {
+  position: absolute;
+  right: var(--hud-right);
+  bottom: calc(var(--hud-bottom) + 84px);
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  padding: 0;
+  border: 1px solid var(--hud-line);
+  border-radius: 50%;
+  background: var(--hud-glass);
+  box-shadow: var(--hud-shadow);
+  -webkit-backdrop-filter: var(--hud-blur);
+  backdrop-filter: var(--hud-blur);
+  color: #fff;
+  font: 700 26px/1 system-ui, sans-serif;
+}
+.touch-jump:active {
+  background: var(--hud-accent);
+}
+.touch-ui .emote-toggle {
+  right: calc(var(--hud-right) + 68px);
+  bottom: calc(var(--hud-bottom) + 91px);
+}
+/* Chat on the left half, the prompt on the right half, so they never cover each other. */
+.touch-ui .chat.live:not(.diary-chat) {
+  bottom: calc(var(--hud-bottom) + 146px);
+  width: min(320px, calc(52% - var(--hud-left)));
+}
+.touch-ui:has(.chat.live.typing) .hud-prompt {
+  display: none;
+}
+.touch-ui .hud-prompt {
+  top: auto;
+  right: var(--hud-right);
+  bottom: calc(var(--hud-bottom) + 154px);
+  left: auto;
+  transform: none;
+  max-width: min(calc(46% - var(--hud-right)), 340px);
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 8px 14px;
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  font-size: 14px;
+  line-height: 1.3;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+.touch-ui .hud-prompt kbd {
+  display: none;
+}
+.touch-ui .hud-prompt:not(.unavailable)::before {
+  content: "👆 ";
+}
+.touch-ui .hud-prompt:not(.unavailable):active {
+  background: var(--hud-accent);
+}
+.touch-ui .chat.diary-chat {
+  bottom: calc(var(--hud-bottom) + 210px);
+}
+
+@media (max-height: 560px) {
+  .touch-stick {
+    width: 108px;
+  }
+  .touch-jump {
+    width: 52px;
+    height: 52px;
+  }
+  .touch-ui .chat.live:not(.diary-chat) {
+    bottom: calc(var(--hud-bottom) + 124px);
+  }
+  .touch-ui .chat.live .chat-list {
+    max-height: 22dvh;
+  }
+  .touch-ui .hud-prompt {
+    bottom: calc(var(--hud-bottom) + 146px);
+  }
+  .touch-ui .chat.diary-chat {
+    top: calc(var(--hud-top) + 44px);
+    bottom: auto;
+  }
+}
+.voice-buttons button[hidden] {
+  display: none;
 }

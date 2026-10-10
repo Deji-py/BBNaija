@@ -6,6 +6,7 @@ export class Hud {
   private readonly promptEl: HTMLElement;
   private readonly clockEl: HTMLElement;
   private lastPrompt = "";
+  private promptAction: (() => void) | null = null;
   private frames = 0;
   private elapsed = 0;
   private lastArea = "";
@@ -21,7 +22,10 @@ export class Hud {
       </div>
       <div class="hud-fps"></div>
       <div class="hud-prompt" hidden></div>
-      <div class="hud-help">WASD move · Shift run · Space jump · drag / Z·C camera · E use · Q emotes · Enter chat · V talk · M mute</div>
+      <details class="hud-help">
+        <summary aria-label="Show controls">?</summary>
+        <div class="hud-help-copy">WASD move · Shift run · Space jump · drag / Z·C camera · E use · Q emotes · Enter chat · V talk · M mute</div>
+      </details>
     `;
     parent.appendChild(el);
     this.areaEl = el.querySelector(".hud-area")!;
@@ -29,6 +33,24 @@ export class Hud {
     this.countEl = el.querySelector(".hud-count")!;
     this.promptEl = el.querySelector(".hud-prompt")!;
     this.clockEl = el.querySelector(".hud-clock")!;
+    // Tapping (or clicking) the prompt does what E would: the touch-screen "use" button.
+    this.promptEl.addEventListener("pointerdown", (e) => {
+      if (!this.promptEl.classList.contains("unavailable")) e.stopPropagation();
+    });
+    this.promptEl.addEventListener("click", () => {
+      if (!this.promptEl.classList.contains("unavailable")) this.promptAction?.();
+    });
+  }
+
+  /** What tapping the prompt does (the same as pressing E). */
+  onPromptTap(action: () => void): void {
+    this.promptAction = action;
+  }
+
+  /** Touch screens: help lists the on-screen controls instead of keys. */
+  setTouchHelp(): void {
+    const copy = this.promptEl.parentElement?.querySelector(".hud-help-copy");
+    if (copy) copy.textContent = "Left stick move (push to the edge to run) · ⤒ jump · drag to look, pinch to zoom · tap the prompt to use · 😀 emotes";
   }
 
   /** House clock, e.g. "🌙 22:05". */

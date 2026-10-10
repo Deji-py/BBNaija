@@ -162,6 +162,7 @@ export const HouseState = schema(
     bigBrotherSpeaking: t.boolean(),
     diaryHousemate: t.string(),
     diaryBroadcast: t.boolean(),
+    diaryConfession: t.boolean(),
     task: Task,
     serverTime: t.float64(),
     round: Round,

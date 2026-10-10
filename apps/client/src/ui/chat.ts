@@ -2,6 +2,8 @@ import { CHAT_MAX_LENGTH, type ChatMessage } from "@bbn/shared";
 import { isTyping } from "../input/keyboard.js";
 
 const VISIBLE_LINES = 50;
+/** How long a message stays on a live feed before fading (it's still there while typing). */
+const LIVE_MS = 12_000;
 
 export interface ChatPanelOptions {
   className?: string;
@@ -9,6 +11,11 @@ export interface ChatPanelOptions {
   label?: string;
   /** Show messages only, with no input (e.g. house chat as seen by viewers). */
   readOnly?: boolean;
+  /**
+   * Draw as a live feed over the scene: messages pop in and fade after a few
+   * seconds so the view clears itself; focusing the input brings them back.
+   */
+  live?: boolean;
 }
 
 /**
@@ -23,6 +30,7 @@ export class ChatPanel {
   private readonly seen = new Set<number>();
   private enabled = true;
   private readonly defaultPlaceholder: string;
+  private readonly live: boolean;
 
   constructor(
     parent: HTMLElement,
@@ -30,18 +38,21 @@ export class ChatPanel {
     options: ChatPanelOptions = {},
   ) {
     this.el = document.createElement("div");
+    this.live = options.live === true;
     this.el.className = `chat ${options.className ?? ""}`;
+    this.el.classList.toggle("live", this.live);
     this.el.innerHTML = `
       <ol class="chat-list" aria-live="polite"></ol>
       <form class="chat-form">
-        <input class="chat-input" maxlength="${CHAT_MAX_LENGTH}" autocomplete="off" aria-label="Chat message" />
+        <input class="chat-input" maxlength="${CHAT_MAX_LENGTH}" autocomplete="off" enterkeyhint="send" aria-label="Chat message" />
       </form>
     `;
     parent.appendChild(this.el);
     this.list = this.el.querySelector(".chat-list")!;
     this.input = this.el.querySelector(".chat-input")!;
     this.list.setAttribute("aria-label", options.label ?? "House chat");
-    this.defaultPlaceholder = options.placeholder ?? "Press Enter to chat";
+    // There's no Enter key to hint at on a touch screen.
+    this.defaultPlaceholder = options.placeholder ?? (matchMedia("(pointer: coarse)").matches ? "Say something…" : "Press Enter to chat");
     this.input.placeholder = this.defaultPlaceholder;
     if (options.readOnly) {
       this.el.querySelector("form")!.remove();
@@ -62,7 +73,10 @@ export class ChatPanel {
       }
       e.stopPropagation(); // keep game shortcuts from firing while typing
     });
-    this.input.addEventListener("focus", () => this.el.classList.add("typing"));
+    this.input.addEventListener("focus", () => {
+      this.el.classList.add("typing");
+      this.list.scrollTop = this.list.scrollHeight;
+    });
     this.input.addEventListener("blur", () => this.el.classList.remove("typing"));
 
     window.addEventListener("keydown", (e) => {
@@ -101,6 +115,7 @@ export class ChatPanel {
     name.style.setProperty("--c", msg.color);
     li.append(name, document.createTextNode(` ${msg.text}`)); // textContent only: never inject HTML
     this.list.appendChild(li);
+    if (this.live) setTimeout(() => li.classList.add("faded"), LIVE_MS);
     while (this.list.children.length > VISIBLE_LINES) this.list.firstElementChild!.remove();
     this.list.scrollTop = this.list.scrollHeight;
   }

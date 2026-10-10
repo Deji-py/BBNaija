@@ -26,6 +26,8 @@ export class SpectatorHud {
     private readonly handlers: {
       onCamera: (mode: CameraMode) => void;
       onReact: (emoji: Reaction) => void;
+      /** Hand the camera to the auto director. Without it there's no Auto button. */
+      onAuto?: () => void;
     },
     /** The Big Brother console hides the viewer-only parts (it has its own housemate list). */
     options: { housemates?: boolean; reactions?: boolean } = {},
@@ -38,8 +40,9 @@ export class SpectatorHud {
         <span class="live-badge">LIVE</span>
         <span class="hud-pill spec-count"></span>
         <span class="hud-pill spec-cam"></span>
+        <button type="button" class="spec-drawer-toggle" aria-expanded="false" aria-controls="spectator-details">People & chat</button>
       </div>
-      <div class="spec-right">
+      <div class="spec-right" id="spectator-details">
         <aside class="spec-housemates" aria-label="Housemates">
           <h2>Housemates</h2>
           <ul></ul>
@@ -57,10 +60,23 @@ export class SpectatorHud {
     this.audioEl = el.querySelector(".spec-audio")!;
     this.floatLayer = el.querySelector(".spec-floats")!;
     this.rightColumn = el.querySelector(".spec-right")!;
+    const drawerToggle = el.querySelector<HTMLButtonElement>(".spec-drawer-toggle")!;
+    drawerToggle.addEventListener("click", () => {
+      const open = this.rightColumn.classList.toggle("open");
+      drawerToggle.setAttribute("aria-expanded", String(open));
+      drawerToggle.textContent = open ? "Close panel" : "People & chat";
+    });
     if (options.housemates === false) el.querySelector<HTMLElement>(".spec-housemates")!.hidden = true;
     if (options.reactions === false) el.querySelector<HTMLElement>(".spec-react")!.hidden = true;
 
     const cams = el.querySelector(".spec-cams")!;
+    if (handlers.onAuto) {
+      const auto = this.camButton("🎬 Auto", "", handlers.onAuto);
+      auto.title = "Let the camera follow the action";
+      auto.classList.add("auto-cam");
+      this.camButtons.set("auto", auto);
+      cams.appendChild(auto);
+    }
     HOUSE_CAMERAS.forEach((cam, i) => {
       const b = this.camButton(`${cam.label}`, `${i + 1}`, () => handlers.onCamera({ kind: "house", area: cam.id }));
       this.camButtons.set(`house:${cam.id}`, b);
@@ -95,20 +111,22 @@ export class SpectatorHud {
     this.audioEl.classList.toggle("off", !ok);
   }
 
-  /** Highlight the active camera and show its name. */
-  setCamera(mode: CameraMode, followedName?: string): void {
+  /** Highlight the active camera and show its name. In auto, only the Auto button lights up. */
+  setCamera(mode: CameraMode, followedName?: string, auto = false): void {
     for (const [key, b] of this.camButtons) {
-      const active =
-        (mode.kind === "house" && key === `house:${mode.area}`) || (mode.kind === "free" && key === "free");
+      const active = auto
+        ? key === "auto"
+        : (mode.kind === "house" && key === `house:${mode.area}`) || (mode.kind === "free" && key === "free");
       b.classList.toggle("active", active);
       b.setAttribute("aria-pressed", String(active));
     }
-    this.camLabelEl.textContent =
+    const label =
       mode.kind === "house"
         ? `📷 ${HOUSE_CAMERAS.find((c) => c.id === mode.area)?.label ?? ""} cam`
         : mode.kind === "follow"
           ? `🎥 Following ${followedName ?? ""}`
           : "🕊️ Free cam · WASD fly · drag look · Q/E down/up";
+    this.camLabelEl.textContent = auto ? `🎬 Auto · ${label.replace(/^\S+ /, "")}` : label;
   }
 
   /** Re-render the housemate list (cheap no-op when nothing changed). */
@@ -169,8 +187,8 @@ export class SpectatorHud {
   private camButton(label: string, key: string, onClick: () => void): HTMLButtonElement {
     const b = document.createElement("button");
     b.type = "button";
-    b.innerHTML = `<kbd></kbd> <span></span>`;
-    b.querySelector("kbd")!.textContent = key;
+    b.innerHTML = key ? `<kbd></kbd> <span></span>` : `<span></span>`;
+    if (key) b.querySelector("kbd")!.textContent = key;
     b.querySelector("span")!.textContent = label;
     b.addEventListener("click", onClick);
     return b;

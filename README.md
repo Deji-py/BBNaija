@@ -224,7 +224,7 @@ Interactable objects (seats, exit spots, ranges) are defined in `packages/shared
 - **Peer-to-peer mesh (WebRTC), unless LiveKit is configured.** Each housemate's browser holds a direct audio connection to every other housemate; audio never touches our server. The server only relays the one-off connection setup (an *offer* and an *answer*, via `voice:signal`). Fine up to ~8 people. Set the three `LIVEKIT_*` variables and the same voice code joins one LiveKit room per house instead (`house-<seasonId>`). Viewers can listen only. Diary Room privacy is still decided in the browser: a speaker only allows the people who should hear them to subscribe.
 - **Spatial audio.** Each incoming voice runs through a Web Audio `PannerNode` placed at that housemate's head; the listener sits at your head facing the camera direction.
 - **Mute / push-to-talk** just disable the outgoing mic track, so they take effect in ~0.1 s with no reconnection.
-- A public STUN server (Google's) helps mesh peers on different networks find each other. Some strict networks (corporate, some mobile carriers) also need a TURN relay. LiveKit replaces that path when it is configured: the SFU relays audio, so those viewers don't depend on peer-to-peer.
+- A public STUN server (Google's) helps mesh peers on different networks find each other. Strict networks (most mobile carriers, many home routers) also need a TURN relay: set `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_API_TOKEN` and the server hands each voice client 24-hour Cloudflare TURN credentials (free up to 1,000 GB/month; only links that can't connect directly use it). The server logs which voice path it's using at startup. LiveKit replaces that path when it is configured: the SFU relays audio, so those viewers don't depend on peer-to-peer.
 
 The house layout (`packages/shared/src/house.ts`) and the collision/movement code (`packages/shared/src/movement.ts`) live in the shared package so the server can run the exact same rules once it becomes authoritative in M2.
 
@@ -266,7 +266,7 @@ That regenerates the Prisma client for Postgres and creates missing tables. It w
 
 Render's free service sleeps after 15 idle minutes, so the first request after a quiet period can take about a minute. Its filesystem is temporary: database-backed accounts, seasons, votes, tasks, and event history persist in Neon, but uploaded TV videos do not survive a restart. Do not use Render's free Postgres for a season you want to keep; those databases expire after 30 days.
 
-For an early small test, voice can use the built-in peer-to-peer mesh. Add a LiveKit Cloud project later for more reliable public voice by setting `LIVEKIT_URL` (`wss://...`), `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in Render. Set `PAYSTACK_SECRET_KEY` only when you are ready to test paid vote packs.
+For an early small test, voice can use the built-in peer-to-peer mesh; set `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_API_TOKEN` so players on mobile data can connect. Add a LiveKit Cloud project later for more reliable public voice by setting `LIVEKIT_URL` (`wss://...`), `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in Render. Set `PAYSTACK_SECRET_KEY` only when you are ready to test paid vote packs.
 
 The older `fly.toml` remains available if you later move to paid, always-on Fly.io hosting.
 
@@ -282,6 +282,8 @@ The older `fly.toml` remains available if you later move to paid, always-on Fly.
 | `BREVO_API_KEY` | server | unset | Brevo transactional-email API key; required for production sign-in |
 | `EMAIL_FROM` | server | unset | Exact sender email verified in Brevo |
 | `EMAIL_FROM_NAME` | server | `Big Brother Ninja` | Sender name shown on magic-link emails |
+| `CLOUDFLARE_TURN_KEY_ID` | server | unset (STUN only) | Cloudflare TURN key id; relays mesh voice on strict networks |
+| `CLOUDFLARE_TURN_API_TOKEN` | server | unset | API token for that TURN key (server only, never sent to browsers) |
 | `LIVEKIT_URL` | server | unset (mesh) | Browser-reachable LiveKit address (`ws://` or `wss://`) |
 | `LIVEKIT_API_KEY` | server | unset | LiveKit API key |
 | `LIVEKIT_API_SECRET` | server | unset | LiveKit API secret |

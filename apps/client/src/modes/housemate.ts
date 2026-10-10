@@ -16,6 +16,8 @@ import {
   type PropRefusedMessage,
   distanceToObject,
   openDoorSet,
+  DIARY_DOOR_ID,
+  insideDiaryRoom,
   nearestInteractable,
   nearestStation,
   GAMES,
@@ -49,6 +51,7 @@ import { DayNight, clockText } from "../scene/dayNight.js";
 import { FollowCamera } from "../scene/followCamera.js";
 import type { Avatar } from "../entities/avatar.js";
 import { Keyboard, isTyping } from "../input/keyboard.js";
+import { TouchControls } from "../input/touchControls.js";
 import { Hud } from "../ui/hud.js";
 import { ChatPanel } from "../ui/chat.js";
 import { showDisconnected } from "../ui/lobby.js";
@@ -123,6 +126,11 @@ export function startHousemateMode(
   followCam.yaw = 0;
   const keyboard = new Keyboard();
   const hud = new Hud(container);
+  const touch = new TouchControls(container, { onJump: () => jump() });
+  if (touch.enabled) {
+    container.classList.add("touch-ui");
+    hud.setTouchHelp();
+  }
 
   let local: LocalPlayer | null = null;
 
@@ -189,10 +197,14 @@ export function startHousemateMode(
   let wasInDiary = false;
 
   // --- chat ---
-  const chat = new ChatPanel(container, (text) => {
-    const message: ChatSendMessage = { text };
-    room.send(Msg.chat, message);
-  });
+  const chat = new ChatPanel(
+    container,
+    (text) => {
+      const message: ChatSendMessage = { text };
+      room.send(Msg.chat, message);
+    },
+    { live: true },
+  );
   room.onMessage(Msg.chat, (msg: ChatMessage) => {
     chat.add(msg);
     const avatar = msg.fromId === room.sessionId ? local?.avatar : players.avatarOf(msg.fromId);
@@ -221,7 +233,12 @@ export function startHousemateMode(
       (input) => room.send(Msg.input, input),
       () => doorColliders,
       // Swimming in the pool, running with Shift (not when exhausted), or walking.
-      () => (player.activity === "pool" ? "swim" : keyboard.isDown("ShiftLeft", "ShiftRight") && (player.needs?.energy ?? 100) >= 8 ? "run" : "walk"),
+      () =>
+        player.activity === "pool"
+          ? "swim"
+          : (keyboard.isDown("ShiftLeft", "ShiftRight") || touch.running) && (player.needs?.energy ?? 100) >= 8
+            ? "run"
+            : "walk",
     );
     local = { avatar, controller, state: player };
     $.onChange(player, () => {
@@ -387,17 +404,31 @@ export function startHousemateMode(
   /** What pressing E would do right now (null = nothing in reach). */
   let eTarget: string | null = null;
 
-  window.addEventListener("keydown", (e) => {
-    if (e.repeat || isTyping(e) || !local || gamePanel.isOpen) return;
-    if (e.code === "KeyE" && eTarget?.startsWith("station:")) {
-      gamePanel.open(eTarget.slice(8));
-    } else if (e.code === "KeyE" && eTarget) {
+  /** E, or tapping the prompt: use whatever's in reach. */
+  const use = () => {
+    if (!local || gamePanel.isOpen || !eTarget) return;
+    if (eTarget.startsWith("station:")) gamePanel.open(eTarget.slice(8));
+    else if (eTarget === "diary:request") room.send(Msg.diaryRequest);
+    else if (eTarget === "diary:leave") room.send(Msg.diaryLeave);
+    else {
       const message: ActionMessage = { objectId: eTarget };
       room.send(Msg.action, message);
+    }
+  };
+  const jump = () => {
+    if (!local || gamePanel.isOpen) return;
+    room.send(Msg.jump);
+    local.avatar.hop();
+  };
+  hud.onPromptTap(use);
+
+  window.addEventListener("keydown", (e) => {
+    if (e.repeat || isTyping(e) || !local || gamePanel.isOpen) return;
+    if (e.code === "KeyE") {
+      use();
     } else if (e.code === "Space") {
       e.preventDefault();
-      room.send(Msg.jump);
-      local.avatar.hop();
+      jump();
     } else if (e.code === "Digit1" || e.code === "Digit2") {
       const message: EmoteMessage = { name: e.code === "Digit1" ? "wave" : "dance" };
       room.send(Msg.emote, message);
@@ -407,7 +438,11 @@ export function startHousemateMode(
   /** Works out the "Press E" prompt from where we are, the current task and who's using what. */
   function updatePrompt(me: PlayerView, x: number, z: number, inDiary: boolean): void {
     eTarget = null;
-    if (inDiary) return hud.setPrompt(null);
+    if (inDiary) {
+      if (!(room.state as HouseStateView).diaryConfession) return hud.setPrompt(null);
+      eTarget = "diary:leave";
+      return hud.setPrompt("Leave the Diary Room");
+    }
     if (me.carrying) {
       eTarget = "prop:drop";
       return hud.setPrompt(`Put down the ${PROP_BY_ID.get(me.carrying)?.label ?? "item"}`);
@@ -466,10 +501,12 @@ export function startHousemateMode(
       return hud.setPrompt(on ? it.promptOff : it.prompt);
     }
     if (it.kind === "door") {
-      eTarget = it.id;
       const open = openDoorSet((room.state as HouseStateView).openDoors ?? "").has(it.id);
+      if (!open && it.id === DIARY_DOOR_ID && !insideDiaryRoom(x, z)) return diaryDoorPrompt();
+      eTarget = it.id;
       return hud.setPrompt(open ? it.promptOff : it.prompt);
     }
+    if (it.id === "diary-chair") return hud.setPrompt("Only when Big Brother calls you", false);
     if (it.kind === "task") {
       eTarget = it.id;
       return hud.setPrompt(it.prompt);
@@ -486,6 +523,19 @@ export function startHousemateMode(
     hud.setPrompt(it.prompt);
   }
 
+  /** Outside the shut Diary Room door: security takes your request (or lets you in to confess when Big Brother's away). */
+  function diaryDoorPrompt(): void {
+    const state = room.state as HouseStateView;
+    if (state.diaryHousemate) return hud.setPrompt("🛡️ Someone's in the Diary Room", false);
+    if (state.bigBrotherId) {
+      eTarget = "diary:request";
+      return hud.setPrompt("🛡️ Ask security to tell Big Brother you want to talk");
+    }
+    if (state.round?.phase === "nominations") return hud.setPrompt("🛡️ Diary Room: wait for Big Brother to call you", false);
+    eTarget = "diary:request";
+    hud.setPrompt("🛡️ Confess in the Diary Room (viewers watch, the house doesn't)");
+  }
+
   /** Diary Room session, Big Brother's mute and voice: banners, chat and mic follow the server's state. */
   function updateBigBrotherState(me: PlayerView, inDiary: boolean): void {
     const state = room.state as HouseStateView;
@@ -496,7 +546,13 @@ export function startHousemateMode(
     }
     banners.setStatus(
       "diary",
-      inDiary ? "🎙️ You're in the Diary Room. Only Big Brother can hear you — the house can't." : null,
+      !inDiary
+        ? null
+        : state.diaryConfession
+          ? "🎙️ Confession: viewers can see and hear you. The house can't."
+          : state.diaryBroadcast
+            ? "🎙️ You're in the Diary Room. Big Brother and the viewers can hear you. The house can't."
+            : "🎙️ You're in the Diary Room. Only Big Brother can hear you. The house can't.",
       "live",
     );
     banners.setStatus("muted", me.adminMuted ? "🔇 Big Brother has muted you." : null, "warn");
@@ -543,7 +599,9 @@ export function startHousemateMode(
         local.avatar.update(dt, WALK_SPEED, "walk");
       } else {
       // In the Diary Room you stay in the chair until Big Brother lets you go.
-      const { forward, right } = inDiary || playing || emoteWheel.isOpen ? { forward: 0, right: 0 } : keyboard.moveAxes();
+      const keys = keyboard.moveAxes();
+      const axes = keys.forward || keys.right ? keys : touch.moveAxes();
+      const { forward, right } = inDiary || playing || emoteWheel.isOpen ? { forward: 0, right: 0 } : axes;
       const yaw = followCam.yaw;
       // "Forward" points from the camera toward the player, flattened onto the ground.
       move.set(-Math.sin(yaw) * forward + Math.cos(yaw) * right, -Math.cos(yaw) * forward - Math.sin(yaw) * right);
@@ -601,6 +659,7 @@ export function startHousemateMode(
 
     house.tv.animate(dt);
     house.doors.animate(dt);
+    house.guards.animate(dt);
     dayNight.update((room.state as HouseStateView).dayMinutes ?? 600);
     hud.setClock(`${dayNight.night > 0.55 ? "🌙" : "☀️"} ${clockText((room.state as HouseStateView).dayMinutes ?? 600)}`);
     house.lights.set((room.state as HouseStateView).lightsOff ?? "");

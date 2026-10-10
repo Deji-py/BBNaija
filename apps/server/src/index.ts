@@ -7,6 +7,8 @@ import { mountMovieRoutes } from "./http/movies.js";
 import { routes } from "./http/routes.js";
 import { isProduction } from "./config.js";
 import { eventLog } from "./systems/eventLog.js";
+import { livekitConfigured } from "./voice/livekit.js";
+import { turnConfigured } from "./voice/turn.js";
 
 const port = Number(process.env.GAME_SERVER_PORT ?? process.env.PORT ?? SERVER_PORT);
 
@@ -30,3 +32,6 @@ const gameServer = defineServer({
 
 await gameServer.listen(port);
 console.log(`[server] listening on ${port}`);
+console.log(
+  `[voice] ${livekitConfigured() ? "LiveKit" : turnConfigured() ? "peer-to-peer mesh with Cloudflare TURN relay" : "peer-to-peer mesh, STUN only (no relay: strict networks can't connect)"}`,
+);

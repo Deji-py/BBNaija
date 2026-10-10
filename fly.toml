@@ -1,6 +1,6 @@
 # Game server on Fly.io. Set secrets before deploy:
 #   fly secrets set DATABASE_URL=postgres://... ADMIN_SECRET=... PUBLIC_URL=https://your-app.fly.dev
-# Optional: LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, PAYSTACK_SECRET_KEY
+# Optional: CLOUDFLARE_TURN_KEY_ID, CLOUDFLARE_TURN_API_TOKEN, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, PAYSTACK_SECRET_KEY
 app = "bbn-game"
 primary_region = "lhr"
 

@@ -17,3 +17,7 @@ services:
         sync: false
       - key: EMAIL_FROM_NAME
         value: Big Brother Ninja
+      - key: CLOUDFLARE_TURN_KEY_ID
+        sync: false
+      - key: CLOUDFLARE_TURN_API_TOKEN
+        sync: false

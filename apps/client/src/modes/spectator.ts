@@ -2,6 +2,7 @@ import * as THREE from "three";
 import {
   Msg,
   type AnnouncementMessage,
+  type CaptionMessage,
   type ChatMessage,
   type ChatSendMessage,
   type ReactionMessage,
@@ -17,12 +18,14 @@ import { buildHouse } from "../scene/house.js";
 import { PartyRoom } from "../scene/partyRoom.js";
 import { DayNight } from "../scene/dayNight.js";
 import { SpectatorCamera, type CameraMode } from "../scene/spectatorCamera.js";
+import { AutoDirector } from "../scene/autoDirector.js";
 import { isTyping } from "../input/keyboard.js";
 import type { HouseRoom } from "../net/connection.js";
 import { moviePlaybackUrl } from "../net/movies.js";
 import { getSessionToken, paymentsApi } from "../net/api.js";
 import { getStateCallbacks } from "../net/stateCallbacks.js";
 import { ChatPanel } from "../ui/chat.js";
+import { CaptionFeed } from "../ui/captions.js";
 import { showDisconnected } from "../ui/lobby.js";
 import { SpectatorHud, areaForKey } from "../ui/spectatorHud.js";
 import { connectVoice } from "../voice/connectVoice.js";
@@ -65,21 +68,39 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
   const gamePanel = new GamePanel(container, { send: (type, message) => room.send(type, message), canPlay: false });
   room.onMessage(Msg.gameTable, (table: GameTableView) => gamePanel.onTable(table));
   room.onMessage(Msg.gameError, (msg: GameErrorMessage) => gamePanel.onError(msg));
-  const liveGames = new LiveGamesList(container, (id) => gamePanel.open(id));
+  // Top-left column under the status bar: live captions, then games in progress.
+  const leftColumn = document.createElement("div");
+  leftColumn.className = "spec-left";
+  container.append(leftColumn);
+  const captions = new CaptionFeed(leftColumn, (ids) => {
+    const id = ids.find((i) => players.remotes.has(i));
+    if (id) setCamera({ kind: "follow", playerId: id });
+  });
+  const liveGames = new LiveGamesList(leftColumn, (id) => gamePanel.open(id));
 
   // --- HUD ---
   let following: string | null = null;
-  const setCamera = (mode: CameraMode) => {
+  // The auto director drives the camera until the viewer picks a camera or housemate themselves.
+  let auto = true;
+  const director = new AutoDirector();
+  const lastChatAt = new Map<string, number>();
+  const lastCaptionAt = new Map<string, number>();
+  let directorCheckAt = 0;
+  const setCamera = (mode: CameraMode, fromDirector = false) => {
+    if (!fromDirector) auto = false;
     if (mode.kind === "follow") {
       const target = players.remotes.get(mode.playerId);
-      if (!target) return;
+      if (!target) {
+        if (fromDirector) director.reset(); // not drawn yet: re-plan next check
+        return;
+      }
       following = mode.playerId;
       cam.setMode(mode, { x: target.avatar.root.position.x, z: target.avatar.root.position.z, rotY: target.avatar.root.rotation.y });
-      hud.setCamera(mode, target.state.name);
+      hud.setCamera(mode, target.state.name, auto);
     } else {
       following = null;
       cam.setMode(mode);
-      hud.setCamera(mode);
+      hud.setCamera(mode, undefined, auto);
     }
   };
 
@@ -89,8 +110,13 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
       const message: ReactionMessage = { emoji };
       room.send(Msg.viewerReact, message);
     },
+    onAuto: () => {
+      auto = true;
+      director.reset();
+      directorCheckAt = 0;
+    },
   });
-  hud.setCamera(cam.mode);
+  hud.setCamera(cam.mode, undefined, auto);
   hud.setAudioStatus("Connecting audio…", true);
   // A viewer never sends audio. Mesh viewers past the listen cap get silence;
   // LiveKit viewers all subscribe.
@@ -126,29 +152,35 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
   $.listen("openDoors", syncDoors);
   syncDoors();
 
-  // If the housemate we follow leaves, fall back to the lounge camera.
+  // If the housemate we follow leaves, fall back to the lounge camera (in auto, the director picks the next shot).
   $.onRemove("players", (_p, id) => {
-    if (id === following) setCamera({ kind: "house", area: "lounge" });
+    if (id === following && !auto) setCamera({ kind: "house", area: "lounge" });
   });
 
   // House chat is visible to viewers (read-only); viewer chat is only ever sent to viewers.
-  const houseChat = new ChatPanel(container, () => {}, { className: "house-chat", label: "House chat", readOnly: true });
+  const houseChat = new ChatPanel(container, () => {}, { className: "house-chat", label: "House chat", readOnly: true, live: true });
   const viewerChat = new ChatPanel(
     hud.rightColumn,
     (text) => {
       const message: ChatSendMessage = { text };
       room.send(Msg.viewerChat, message);
     },
-    { className: "viewer-chat", label: "Viewer chat", placeholder: "Chat with other viewers (Enter)" },
+    { className: "viewer-chat", label: "Viewer chat", placeholder: "Chat with other viewers (Enter)", live: true },
   );
   room.onMessage(Msg.chat, (msg: ChatMessage) => {
     houseChat.add(msg);
+    lastChatAt.set(msg.fromId, performance.now());
     players.avatarOf(msg.fromId)?.showChat(msg.text);
   });
   room.onMessage(Msg.chatHistory, (h: ChatMessage[]) => h.forEach((m) => houseChat.add(m)));
   room.onMessage(Msg.viewerChat, (msg: ChatMessage) => viewerChat.add(msg));
   room.onMessage(Msg.viewerChatHistory, (h: ChatMessage[]) => h.forEach((m) => viewerChat.add(m)));
   room.onMessage(Msg.viewerReact, ({ emoji }: ReactionMessage) => hud.floatReaction(emoji));
+  room.onMessage(Msg.caption, (c: CaptionMessage) => {
+    captions.add(c);
+    for (const id of c.focus) lastCaptionAt.set(id, performance.now());
+  });
+  room.onMessage(Msg.captionHistory, (list: CaptionMessage[]) => captions.addHistory(list, room.state.serverTime || Date.now()));
 
   // Big Brother: announcements, tasks (watch only), Diary Room transcript when it's broadcast.
   const banners = new Banners(container);
@@ -189,6 +221,7 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
   }, 100);
   room.send(Msg.chatHistory);
   room.send(Msg.viewerChatHistory);
+  room.send(Msg.captionHistory);
 
   window.addEventListener("keydown", (e) => {
     if (e.repeat || isTyping(e)) return;
@@ -216,6 +249,20 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
     props.update(dt);
     stationSigns.update(room.state);
     liveGames.update(room.state);
+
+    const now = performance.now();
+    if (auto && now >= directorCheckAt) {
+      directorCheckAt = now + 500;
+      const state = room.state as HouseStateView;
+      const shot = director.next(now, {
+        players: [...(room.state.players?.entries() ?? [])].map(([id, p]) => ({ id, x: p.x, z: p.z, speaking: p.speaking, activity: p.activity })),
+        diaryBroadcast: state.diaryHousemate && state.diaryBroadcast ? state.diaryHousemate : null,
+        partyOn: !!state.partyOn,
+        lastChatAt,
+        lastCaptionAt,
+      });
+      if (shot) setCamera(shot, true);
+    }
 
     const target = following ? players.remotes.get(following)?.avatar.root : undefined;
     cam.update(dt, target ? { x: target.position.x, z: target.position.z, rotY: target.rotation.y } : undefined);
@@ -247,6 +294,7 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
     }
     house.tv.animate(dt);
     house.doors.animate(dt);
+    house.guards.animate(dt);
     dayNight.update((room.state as HouseStateView).dayMinutes ?? 600);
     house.lights.set((room.state as HouseStateView).lightsOff ?? "");
     party.update(dt, !!(room.state as HouseStateView).partyOn);

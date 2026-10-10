@@ -99,6 +99,14 @@ export const Msg = {
   announcement: "announcement",
   /** Diary Room text between Big Brother and the housemate in session (and viewers when broadcast). */
   diaryChat: "diary:chat",
+  /** Housemate at the Diary Room door → server: ask to see Big Brother (or confess, when nobody's at the console). */
+  diaryRequest: "diary:request",
+  /** Housemate → server: leave a confession session (only those; Big Brother ends the others). */
+  diaryLeave: "diary:leave",
+  /** Server → viewers only: a live caption about what's going on that the house doesn't know. */
+  caption: "caption",
+  /** Viewer → server: request recent captions. Server → viewer: the recent captions. */
+  captionHistory: "caption:history",
   /** Housemate → server: answer to the current quiz question. */
   quizAnswer: "quiz:answer",
 
@@ -191,6 +199,16 @@ export interface DiaryChatMessage {
   text: string;
 }
 
+/** Viewer-only caption ("Ada nominated Tobi — they were in the kitchen together 4 minutes ago"). */
+export interface CaptionMessage {
+  id: number;
+  icon: string;
+  text: string;
+  at: number;
+  /** Housemates it's about (session ids), so the viewer camera can go to them. */
+  focus: string[];
+}
+
 export interface QuizAnswerMessage {
   /** Option index 0–3. */
   answer: number;
@@ -239,6 +257,15 @@ export interface VoiceGrant {
   url?: string;
   /** Short-lived join token. Set when provider is livekit. */
   token?: string;
+  /** STUN/TURN servers for the mesh. Missing means the client's public STUN default. */
+  iceServers?: IceServer[];
+}
+
+/** Same shape as the browser's RTCIceServer. */
+export interface IceServer {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
 }
 
 export const REACTIONS = ["❤️", "😂", "😮", "👏", "🔥", "😢"] as const;
@@ -509,6 +536,8 @@ export interface HouseStateView {
   /** Housemate in the Diary Room with Big Brother ("" if none). */
   diaryHousemate: string;
   diaryBroadcast: boolean;
+  /** The session is a confession the housemate asked for (no Big Brother at the console); they may leave it. */
+  diaryConfession: boolean;
   /** The current (or just finished) task; undefined when none. */
   task: TaskView | undefined;
   /** Server clock (ms since epoch) at the last patch, to line up countdowns. */

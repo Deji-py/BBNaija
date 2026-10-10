@@ -22,6 +22,7 @@ import { box, mat } from "./materials.js";
 import { artTexture } from "./wallArt.js";
 import { buildStationModel } from "./gameHall.js";
 import { buildPartyModel } from "./partyRoom.js";
+import { HouseGuards } from "./guards.js";
 
 const FLOOR_COLORS: Record<AreaId, number> = {
   lounge: 0xc9a27a,
@@ -77,6 +78,8 @@ export interface House {
   setShowers(inUse: ReadonlySet<string>): void;
   /** Ceiling lamps per room, switched from the room's `lightsOff` state. */
   lights: RoomLights;
+  /** Security at the Diary Room door. Call `animate` each frame. */
+  guards: HouseGuards;
 }
 
 /** Ceiling lamp spots per room (the light switch by the door turns them all on or off). */
@@ -352,7 +355,7 @@ export function buildHouse(): House {
     }
   };
   lights.adopt("lounge", root.getObjectByName("chandelier"));
-  return { root, cameraBlockers, tv: new TvScreen(screen), doors, setShowers, lights };
+  return { root, cameraBlockers, tv: new TvScreen(screen), doors, setShowers, lights, guards: new HouseGuards(root) };
 }
 
 /** Finish for whatever is on one side of a wall (a room, or outside). */
@@ -1370,6 +1373,8 @@ export function buildModel(kind: string, w: number, d: number, h: number, id = "
       g.add(box(0.035, 0.06, 0.02, 0xdedbd2, 0, h - 0.03, -d / 2 + 0.02));
       break;
     }
+    case "guard":
+      break; // a person, not a model: see HouseGuards
     default:
       if (!buildPartyModel(g, kind, w, d, h)) buildStationModel(g, kind, w, d, h, id);
       break;

@@ -28,7 +28,7 @@ export function connectVoice(
       const voice: RoutedVoice =
         grant.provider === "livekit" && grant.url && grant.token
           ? new LiveKitVoiceProvider(grant.url, grant.token, audio, room)
-          : new MeshVoiceProvider(room, audio, shouldOffer);
+          : new MeshVoiceProvider(room, audio, shouldOffer, grant.iceServers);
       voice.join(localStream);
       resolve({ voice, grant });
     });

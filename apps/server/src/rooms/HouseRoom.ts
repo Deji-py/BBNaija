@@ -1,4 +1,4 @@
-import { Room, type Client } from "colyseus";
+import { Room, type Client, type Delayed } from "colyseus";
 import {
   CloseCode,
   EMOTES,
@@ -21,6 +21,11 @@ import {
   applyInputStep,
   areaAt,
   chooseSlot,
+  DIARY_CLOSED_REASON,
+  DIARY_DOOR_ID,
+  DIARY_ESCORT_POINT,
+  doorById,
+  insideDiaryRoom,
   housemateStatus,
   distanceToObject,
   collidersFor,
@@ -66,11 +71,13 @@ import { currentMovieToken, movieTokenMatches } from "../movies/store.js";
 import { eventLog } from "../systems/eventLog.js";
 import { db } from "../db/client.js";
 import { livekitConfigured, livekitGrant } from "../voice/livekit.js";
+import { turnIceServers } from "../voice/turn.js";
 import { RateLimiter } from "../systems/rateLimit.js";
 import { SeasonRound } from "../systems/round.js";
 import { TaskRunner } from "../systems/tasks.js";
 import { GameHall } from "../systems/gameHall.js";
 import { NeedsSystem } from "../systems/needs.js";
+import { Captions } from "../systems/captions.js";
 import { field, parseInput, parseVoiceSignal, parseVoiceState, sanitizeColor, sanitizeName } from "./parse.js";
 
 /** Inputs a client may have waiting before we start dropping them. */
@@ -100,6 +107,18 @@ const MIN_ENERGY_TO_RUN = 8;
 
 /** How Big Brother appears in house chat and the Diary Room. */
 const BIG_BROTHER = { id: "bigbrother", name: "Big Brother", color: "#e0243b" } as const;
+/** A confession (asked for at the door while nobody's at the console) lasts this long at most. */
+const CONFESSION_MS = 2 * 60_000;
+/** What Big Brother asks at the start of a confession. `{name}` is another housemate. */
+const CONFESSION_PROMPTS = [
+  "Who in the house do you trust the least right now, and why?",
+  "If you could save only one housemate this week, who would it be?",
+  "Tell Big Brother something the house doesn't know.",
+  "Who is playing a game, and who is being real?",
+  "What do you really think of {name}?",
+  "If {name} were up for eviction tonight, would you be sad to see them go?",
+  "What would you say to {name} if they couldn't hear you?",
+] as const;
 
 /** What onAuth decided about a joining client (available as `client.auth` in onJoin). */
 interface JoinAuth {
@@ -154,16 +173,23 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
   private readonly reactionLimiter = new RateLimiter(5, 300);
   private readonly jumpLimiter = new RateLimiter(3, 400);
   private readonly partyLimiter = new RateLimiter(3, 1500);
+  /** Asking security for the Diary Room: once a minute per housemate. */
+  private readonly diaryRequestLimiter = new RateLimiter(1, 60_000);
   private unsubscribeLog: () => void = () => {};
   private tasks!: TaskRunner;
   private games!: GameHall;
   private needs!: NeedsSystem;
   private round!: SeasonRound;
+  private captions!: Captions;
+  /** The running confession's timer, and the broadcast setting to put back afterwards. */
+  private confession: { ends: Delayed; restoreBroadcast: boolean } | null = null;
   /** The season (house) this room belongs to. One room per live season (see filterBy in index.ts). */
   private seasonId = "";
   /** Ids of doors currently open. Shut doors are colliders; this stays in step with `state.openDoors`. */
   private readonly openDoors = new Set<string>();
   private diaryChatId = 1;
+  /** Counts ticks so security checks the Diary Room door once a second, not every tick. */
+  private guardTicks = 0;
 
   /** Session ids by account, so one account can't be in the house twice. */
   private readonly sessionByUser = new Map<string, string>();
@@ -225,6 +251,7 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
     this.state.bigBrotherSpeaking = false;
     this.state.diaryHousemate = "";
     this.state.diaryBroadcast = true;
+    this.state.diaryConfession = false;
     this.state.serverTime = Date.now();
     const round = new Round();
     round.phase = "free";
@@ -236,6 +263,9 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
     round.winnerName = "";
     round.winnerColor = "";
     this.state.round = round;
+
+    this.captions = new Captions(this.state, { send: (caption) => this.sendToViewers(Msg.caption, caption) });
+    this.clock.setInterval(() => this.captions.tick(), 1000);
 
     this.tasks = new TaskRunner(this.state, this.clock, {
       log: (type, text) => this.log(type, text),
@@ -270,6 +300,8 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
       setDiaryPrivate: () => {
         this.state.diaryBroadcast = false;
       },
+      caption: (icon, text, focus) => this.captions.add(icon, text, focus),
+      revealBallots: (ballots) => this.captions.revealBallots(ballots),
       persistPerks: async (sessionId) => {
         const userId = this.userIdFor(sessionId);
         const player = this.state.players.get(sessionId);
@@ -379,7 +411,7 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
     if (id === this.state.bigBrotherId) {
       this.state.bigBrotherId = "";
       this.state.bigBrotherSpeaking = false;
-      if (this.state.diaryHousemate) this.endDiary("the console closed");
+      if (this.state.diaryHousemate && !this.state.diaryConfession) this.endDiary("the console closed");
       this.log("admin", "Big Brother console disconnected");
       return;
     }
@@ -406,7 +438,11 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
     if (player?.carrying) this.putDown(player, true);
     this.needs.leave(id, this.userIdFor(id));
     for (const [userId, sessionId] of this.sessionByUser) if (sessionId === id) this.sessionByUser.delete(userId);
-    if (id === this.state.diaryHousemate) this.state.diaryHousemate = "";
+    if (id === this.state.diaryHousemate) {
+      this.state.diaryHousemate = "";
+      this.endConfession();
+    }
+    this.captions.forget(id);
     this.state.players.delete(id);
     this.sims.delete(id);
     this.chat.forget(id);
@@ -534,11 +570,30 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
       if (!this.state.diaryHousemate || (!isAdmin && client.sessionId !== this.state.diaryHousemate)) return;
       const text = ChatLog.sanitize(field(message, "text"));
       if (!text || !this.chat.allow(`diary:${client.sessionId}`)) return;
-      const from = isAdmin ? BIG_BROTHER : player!;
-      const msg: ChatMessage = { id: this.diaryChatId++, fromId: from.id, name: from.name, color: from.color, text, at: Date.now() };
-      this.clients.getById(this.state.diaryHousemate)?.send(Msg.diaryChat, msg);
-      this.sendToAdmin(Msg.diaryChat, msg);
-      if (this.state.diaryBroadcast) this.sendToViewers(Msg.diaryChat, msg);
+      this.sendDiaryChat(isAdmin ? BIG_BROTHER : player!, text);
+      if (!isAdmin && player && this.state.diaryBroadcast) this.captions.diaryLine(player, text);
+    });
+
+    // At the Diary Room door: security tells Big Brother, or (nobody at the console) lets you in to confess.
+    this.onMessage(Msg.diaryRequest, (client) => {
+      const player = this.state.players.get(client.sessionId);
+      const door = INTERACTABLE_BY_ID.get(DIARY_DOOR_ID);
+      if (!player || !door || player.exiting || this.isInDiary(player.id)) return;
+      if (distanceToObject(DIARY_DOOR_ID, player.x, player.z) > door.range) return;
+      if (this.state.diaryHousemate) return this.refuse(player, "Security: someone's in the Diary Room. Try again soon.");
+      if (this.state.bigBrotherId === "" && this.state.round.phase === "nominations") return this.refuse(player, DIARY_CLOSED_REASON);
+      if (!this.diaryRequestLimiter.allow(player.id)) return this.refuse(player, "Security: you've just asked. Give it a minute.");
+      if (this.state.bigBrotherId) {
+        const told: AnnouncementMessage = { text: "Security has told Big Brother you'd like to talk.", to: player.id };
+        client.send(Msg.announcement, told);
+        this.log("diary", `${player.name} asked to see Big Brother`);
+        return;
+      }
+      this.callToDiary(player.id, true);
+    });
+
+    this.onMessage(Msg.diaryLeave, (client) => {
+      if (this.state.diaryConfession && client.sessionId === this.state.diaryHousemate) this.endDiary("they finished confessing");
     });
   }
 
@@ -593,10 +648,13 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
 
     if (it.kind === "door") {
       if (this.openDoors.has(objectId)) this.openDoors.delete(objectId);
+      else if (objectId === DIARY_DOOR_ID && !insideDiaryRoom(player.x, player.z)) return this.refuse(player, DIARY_CLOSED_REASON);
       else this.openDoors.add(objectId);
       this.state.openDoors = openDoorList(this.openDoors);
       return;
     }
+    // Big Brother seats a called housemate (callToDiary); nobody sits there uninvited.
+    if (objectId === "diary-chair") return this.refuse(player, DIARY_CLOSED_REASON);
     if (it.kind === "light") {
       const area = objectId.slice("light-".length);
       const off = new Set(this.state.lightsOff.split(" ").filter(Boolean));
@@ -737,6 +795,10 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
   /** One server tick: apply queued inputs to each player within their movement budget. */
   private tick(): void {
     this.round.tick();
+    if (++this.guardTicks >= TICK_RATE_HZ) {
+      this.guardTicks = 0;
+      this.guardDiaryDoor();
+    }
     const colliders = this.colliders();
     for (const [id, sim] of this.sims) {
       const player = this.state.players.get(id);
@@ -859,6 +921,10 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
       if (this.viewers.has(client.sessionId)) client.send(Msg.viewerChatHistory, this.viewerChat.recent());
     });
 
+    this.onMessage(Msg.captionHistory, (client) => {
+      if (this.viewers.has(client.sessionId)) client.send(Msg.captionHistory, this.captions.recent());
+    });
+
     this.onMessage(Msg.viewerReact, (client, message: unknown) => {
       const emoji = field(message, "emoji");
       if (!this.viewers.has(client.sessionId) || !REACTIONS.includes(emoji as Reaction)) return;
@@ -900,7 +966,7 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
     const inHouse = !!this.state.players.get(client.sessionId) || client.sessionId === this.state.bigBrotherId || !!viewer;
     if (!inHouse) return { provider: "mesh", audio: false };
     if (viewer && !viewer.audio) return { provider: "mesh", audio: false };
-    if (!livekitConfigured()) return { provider: "mesh", audio: true };
+    if (!livekitConfigured()) return { provider: "mesh", audio: true, iceServers: await turnIceServers() };
     return livekitGrant(client.sessionId, this.seasonId, !viewer);
   }
 
@@ -940,6 +1006,7 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
       const broadcast = field(message, "broadcast");
       if (typeof broadcast !== "boolean") return;
       this.state.diaryBroadcast = broadcast;
+      if (this.confession) this.confession.restoreBroadcast = broadcast;
       this.log("diary", `Diary Room ${broadcast ? "is broadcast to viewers" : "is private"}`);
     });
 
@@ -1015,7 +1082,11 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
     this.log("announcement", text);
   }
 
-  private callToDiary(playerId: string): void {
+  /**
+   * Seat a housemate in the Diary Room. `confession`: they asked at the door while
+   * nobody was at the console, so it's broadcast, timed, and they may leave.
+   */
+  private callToDiary(playerId: string, confession = false): void {
     const player = this.state.players.get(playerId);
     const sim = this.sims.get(playerId);
     if (!player || !sim || this.state.diaryHousemate === playerId) return;
@@ -1029,22 +1100,89 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
     if (player.activity) this.standUp(player, sim);
     if (player.carrying) this.putDown(player, true);
 
+    // A session is private: security walks anyone else out and shuts the door.
+    for (const p of this.state.players.values()) {
+      const s = this.sims.get(p.id);
+      if (p.id === playerId || !s || !insideDiaryRoom(p.x, p.z)) continue;
+      if (p.activity) this.standUp(p, s);
+      if (p.carrying) this.putDown(p, true);
+      this.placeInSlot(p, s, "", { ...DIARY_ESCORT_POINT, rotY: 0 });
+    }
+    this.closeDiaryDoor();
+
     const chair = INTERACTABLE_BY_ID.get("diary-chair") as SlotInteractable;
     this.placeInSlot(player, sim, "diary-chair", chair.slots[0]!);
     this.state.diaryHousemate = playerId;
     this.round.onEnteredDiary(playerId);
 
-    const call: AnnouncementMessage = { text: "Big Brother would like to see you in the Diary Room.", to: playerId };
+    if (confession) {
+      this.confession = {
+        ends: this.clock.setTimeout(() => this.endDiary("their confession time was up"), CONFESSION_MS),
+        restoreBroadcast: this.state.diaryBroadcast,
+      };
+      this.state.diaryBroadcast = true;
+      this.state.diaryConfession = true;
+      this.clock.setTimeout(() => {
+        if (this.state.diaryHousemate === playerId && this.state.diaryConfession) this.sendDiaryChat(BIG_BROTHER, this.confessionPrompt(playerId));
+      }, 1500);
+    }
+    const call: AnnouncementMessage = {
+      text: confession ? "Security lets you into the Diary Room. Viewers are watching. Say what's on your mind." : "Big Brother would like to see you in the Diary Room.",
+      to: playerId,
+    };
     this.clients.getById(playerId)?.send(Msg.announcement, call);
-    this.log("diary", `${player.name} was called to the Diary Room`);
+    this.captions.add("🎙️", confession ? `${player.name} went to the Diary Room to confess` : `Big Brother called ${player.name} to the Diary Room`, [playerId]);
+    this.log("diary", confession ? `${player.name} went to the Diary Room to confess` : `${player.name} was called to the Diary Room`);
+  }
+
+  private confessionPrompt(playerId: string): string {
+    const others = [...this.state.players.values()].filter((p) => p.id !== playerId && !p.exiting);
+    const choices = CONFESSION_PROMPTS.filter((q) => others.length > 0 || !q.includes("{name}"));
+    const prompt = choices[Math.floor(Math.random() * choices.length)]!;
+    return prompt.replace("{name}", others[Math.floor(Math.random() * others.length)]?.name ?? "");
+  }
+
+  /** One Diary Room line to the housemate in session, the console, and viewers when it's broadcast. */
+  private sendDiaryChat(from: { id: string; name: string; color: string }, text: string): void {
+    const msg: ChatMessage = { id: this.diaryChatId++, fromId: from.id, name: from.name, color: from.color, text, at: Date.now() };
+    this.clients.getById(this.state.diaryHousemate)?.send(Msg.diaryChat, msg);
+    this.sendToAdmin(Msg.diaryChat, msg);
+    if (this.state.diaryBroadcast) this.sendToViewers(Msg.diaryChat, msg);
+  }
+
+  /** Security shuts the Diary Room door once nobody is inside or standing in the doorway. */
+  private guardDiaryDoor(): void {
+    if (!this.openDoors.has(DIARY_DOOR_ID)) return;
+    const door = doorById(DIARY_DOOR_ID)!;
+    const doorway = doorBox(door);
+    const inTheWay = [...this.state.players.values()].some(
+      (p) =>
+        insideDiaryRoom(p.x, p.z) ||
+        (p.x > doorway.minX - 1 && p.x < doorway.maxX + 1 && p.z > doorway.minZ - 1 && p.z < doorway.maxZ + 1),
+    );
+    if (!inTheWay) this.closeDiaryDoor();
+  }
+
+  private closeDiaryDoor(): void {
+    if (!this.openDoors.delete(DIARY_DOOR_ID)) return;
+    this.state.openDoors = openDoorList(this.openDoors);
   }
 
   private endDiary(reason: string): void {
     const player = this.state.players.get(this.state.diaryHousemate);
     const sim = player && this.sims.get(player.id);
     this.state.diaryHousemate = "";
+    this.endConfession();
     if (player && sim && player.activity === "diary-chair") this.standUp(player, sim);
     if (player) this.log("diary", `${player.name} left the Diary Room (${reason})`);
+  }
+
+  private endConfession(): void {
+    if (!this.confession) return;
+    this.confession.ends.clear();
+    this.state.diaryBroadcast = this.confession.restoreBroadcast;
+    this.state.diaryConfession = false;
+    this.confession = null;
   }
 
   // ---------------------------------------------------------------- helpers

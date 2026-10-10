@@ -19,6 +19,7 @@ import {
 } from "@bbn/shared";
 import { db } from "../db/client.js";
 import { extraVotes } from "./payments.js";
+import type { BallotReveal } from "./captions.js";
 import { RateLimiter } from "./rateLimit.js";
 import { Nominee, type HouseState, type Player } from "../schema/HouseState.js";
 
@@ -78,6 +79,10 @@ export interface RoundHooks {
   standUp(player: Player): void;
   endDiary(): void;
   setDiaryPrivate(): void;
+  /** Viewer-only caption. */
+  caption(icon: string, text: string, focus: string[]): void;
+  /** Nominations closed: tell viewers (never the house) who nominated whom. */
+  revealBallots(ballots: BallotReveal[]): void;
   persistPerks(sessionId: string): Promise<void>;
 }
 
@@ -85,6 +90,8 @@ export class SeasonRound {
   private roundNumber = 0;
   /** Nominator key → the people they named. Secret from other housemates. */
   private ballots = new Map<string, Pick[]>();
+  /** Nominator key → their name, for the viewers' reveal. */
+  private readonly ballotNames = new Map<string, string>();
   private slate: SlateMember[] = [];
   /** Housemates may still submit a nomination. */
   private collecting = false;
@@ -229,6 +236,7 @@ export class SeasonRound {
 
     this.roundNumber++;
     this.ballots.clear();
+    this.ballotNames.clear();
     this.slate = [];
     this.collecting = true;
     this.bbFill = false;
@@ -261,6 +269,7 @@ export class SeasonRound {
     if (this.state.round.phase !== "nominations") return this.tell("Nominations aren't open.");
     await db.nomination.deleteMany({ where: { seasonId: this.hooks.seasonId, round: this.roundNumber } });
     this.ballots.clear();
+    this.ballotNames.clear();
     this.slate = [];
     this.collecting = false;
     this.bbFill = false;
@@ -299,9 +308,11 @@ export class SeasonRound {
       })),
     });
     this.ballots.set(key, picks);
+    this.ballotNames.set(key, player.name);
     // The extra slot is spent by using it. A single nomination leaves the perk for later.
     if (picks.length >= 2) await this.dropPerk(sessionId, "nominationPower");
     this.hooks.log("nomination", `${player.name} nominated ${picks.map((p) => p.name).join(" and ")}`);
+    this.hooks.caption("🗳️", `${player.name} has nominated. Who? Revealed when nominations close.`, [sessionId]);
     this.sendStatus(sessionId);
     this.pushAdmin();
   }
@@ -309,6 +320,12 @@ export class SeasonRound {
   private async doCloseNominations(): Promise<void> {
     if (!this.collecting) return this.tell("Nominations are already closed.");
     this.collecting = false;
+    this.hooks.revealBallots(
+      [...this.ballots].map(([key, picks]) => ({
+        by: { sessionId: this.sessionForKey(key), name: this.ballotNames.get(key) ?? "A housemate" },
+        picks: picks.map((p) => ({ sessionId: this.sessionForKey(p.key), name: p.name })),
+      })),
+    );
     this.slate = this.rankedSlate();
     if (this.slate.length >= NOMINATION_SLATE_SIZE) {
       await this.lockSlate("save");

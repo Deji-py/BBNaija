@@ -67,20 +67,43 @@ export class FollowCamera {
   }
 
   private bindPointer(dom: HTMLElement): void {
-    let dragging = false;
+    // Deltas come from positions rather than movementX/Y, which touch screens don't reliably report.
+    const pointers = new Map<number, { x: number; y: number }>();
+    let pinch = 0;
+    const spread = () => {
+      const [a, b] = [...pointers.values()];
+      return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+    };
+    const lift = (e: PointerEvent) => {
+      pointers.delete(e.pointerId);
+      pinch = spread();
+      if (dom.hasPointerCapture(e.pointerId)) dom.releasePointerCapture(e.pointerId);
+    };
     dom.addEventListener("pointerdown", (e) => {
       if (!this.pointerEnabled) return;
-      dragging = true;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      pinch = spread();
       dom.setPointerCapture(e.pointerId);
     });
-    dom.addEventListener("pointerup", (e) => {
-      dragging = false;
-      dom.releasePointerCapture(e.pointerId);
-    });
+    dom.addEventListener("pointerup", lift);
+    dom.addEventListener("pointercancel", lift);
     dom.addEventListener("pointermove", (e) => {
-      if (!dragging || !this.pointerEnabled) return;
+      const last = pointers.get(e.pointerId);
+      if (!last || !this.pointerEnabled) return;
+      const dx = e.clientX - last.x;
+      const dy = e.clientY - last.y;
+      last.x = e.clientX;
+      last.y = e.clientY;
       this.lastDragAt = performance.now();
-      this.rotate(-e.movementX * 0.005, e.movementY * 0.004);
+      if (pointers.size >= 2) {
+        // Two fingers: pinch to zoom.
+        const now = spread();
+        if (pinch > 0) this.distance = THREE.MathUtils.clamp(this.distance * (pinch / Math.max(now, 1)), MIN_DISTANCE, MAX_DISTANCE);
+        pinch = now;
+        return;
+      }
+      const touch = e.pointerType === "touch" ? 1.6 : 1;
+      this.rotate(-dx * 0.005 * touch, dy * 0.004 * touch);
     });
     dom.addEventListener(
       "wheel",

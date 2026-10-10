@@ -14,6 +14,9 @@ export class NeedsPanel {
   constructor(parent: HTMLElement) {
     this.el = document.createElement("aside");
     this.el.className = "needs-panel";
+    const compact = matchMedia("(max-width: 700px), (max-height: 560px)");
+    if (compact.matches) this.el.classList.add("folded");
+    compact.addEventListener("change", ({ matches }) => this.el.classList.toggle("folded", matches));
     this.el.hidden = true;
     this.mood = document.createElement("button");
     this.mood.type = "button";

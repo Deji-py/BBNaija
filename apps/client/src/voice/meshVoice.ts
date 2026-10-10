@@ -10,9 +10,9 @@ import type { SpatialAudio } from "./spatialAudio.js";
 import type { HearMode, RoutedVoice, Vec3 } from "./VoiceProvider.js";
 
 /** Public STUN server: lets peers discover their public address when not on the same network. */
-const ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
-/** Longest we wait for ICE candidate gathering before sending what we have. */
-const ICE_GATHER_TIMEOUT_MS = 2000;
+const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+/** Longest we wait for ICE candidate gathering before sending what we have. Long enough for TURN relay addresses. */
+const ICE_GATHER_TIMEOUT_MS = 3000;
 const RETRY_DELAY_MS = 2000;
 const MAX_RETRIES = 3;
 
@@ -49,6 +49,8 @@ export class MeshVoiceProvider implements RoutedVoice {
     private readonly audio: SpatialAudio,
     /** Whether we make the offer to peer `id` (the other side then only answers). */
     private readonly shouldOffer: (id: string) => boolean,
+    /** From the server: STUN plus a TURN relay for networks where direct links fail. */
+    private readonly iceServers: RTCIceServer[] = DEFAULT_ICE_SERVERS,
   ) {
     room.onMessage(Msg.voiceSignal, (relay: VoiceSignalRelay) => void this.handleSignal(relay));
     // A viewer who was listening to us has gone.
@@ -137,7 +139,7 @@ export class MeshVoiceProvider implements RoutedVoice {
   }
 
   private createPeer(id: string, retries = 0): Peer {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers });
     const peer: Peer = { pc, retries };
     this.peers.set(id, peer);
 

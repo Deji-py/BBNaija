@@ -106,7 +106,9 @@ export type FurnitureKind =
   | "discoBall"
   | "partyLight"
   | "stage"
-  | "lightSwitch";
+  | "lightSwitch"
+  // House security, standing at the Diary Room door
+  | "guard";
 
 export interface Furniture {
   /** Stable id — interactions (M4) refer to objects by this. */
@@ -259,6 +261,19 @@ export const DOORS: readonly Door[] = [
 
 const DOOR_BY_ID: ReadonlyMap<string, Door> = new Map(DOORS.map((d) => [d.id, d]));
 
+/**
+ * The guarded door. Housemates only go in when Big Brother calls them (the call
+ * seats them in the chair); from inside, anyone may open it to leave.
+ */
+export const DIARY_DOOR_ID = "door-diary";
+export const DIARY_CLOSED_REASON = "Security: the Diary Room is closed until Big Brother calls you.";
+/** Where security walks anyone still inside when a session starts: the lounge, between the guards. */
+export const DIARY_ESCORT_POINT = { x: -2, z: -0.6 } as const;
+
+export function insideDiaryRoom(x: number, z: number): boolean {
+  return areaAt(x, z)?.id === "diary";
+}
+
 export function doorById(id: string): Door | undefined {
   return DOOR_BY_ID.get(id);
 }
@@ -373,6 +388,9 @@ export const FURNITURE: readonly Furniture[] = [
   { id: "diary-camera", kind: "camera", x: -2, z: -4.3, w: 0.5, d: 0.5, h: 1.5, facing: NORTH, solid: true },
   { id: "softbox-left", kind: "softbox", x: -4.2, z: -6.6, w: 0.5, d: 0.5, h: 1.8, facing: NORTH, solid: true },
   { id: "softbox-right", kind: "softbox", x: 0.2, z: -6.6, w: 0.5, d: 0.5, h: 1.8, facing: NORTH, solid: true },
+  // Security either side of the Diary Room door, clear of the leaf that swings into the lounge.
+  { id: "guard-diary-west", kind: "guard", x: -3.6, z: -1.5, w: 0.6, d: 0.6, h: 1.9, facing: SOUTH, solid: true },
+  { id: "guard-diary-east", kind: "guard", x: -0.4, z: -1.5, w: 0.6, d: 0.6, h: 1.9, facing: SOUTH, solid: true },
   // Garden
   { id: "pool", kind: "pool", x: -3, z: 18, w: 10, d: 6, h: 0.1, solid: true },
   { id: "pergola", kind: "pergola", x: 8.5, z: 16, w: 4, d: 3, h: 2.8, solid: false },
