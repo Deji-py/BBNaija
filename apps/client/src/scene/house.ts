@@ -135,6 +135,7 @@ export class RoomLights {
       const on = !off.has(area);
       for (const l of list) {
         l.light.intensity = on ? l.base : 0;
+        l.light.visible = on;
         if (l.lamp) l.lamp.material = on ? this.lit : this.unlit;
       }
     }

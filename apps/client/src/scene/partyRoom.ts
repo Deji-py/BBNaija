@@ -142,7 +142,10 @@ export class PartyRoom {
       for (const { beam } of this.heads) beam.visible = partyOn;
       if (!partyOn) {
         for (const tile of this.tiles) (tile.material as THREE.MeshStandardMaterial).emissive.setHex(0x000000);
-        for (const spot of this.spots) spot.intensity = 0;
+        for (const spot of this.spots) {
+          spot.intensity = 0;
+          spot.visible = false;
+        }
       }
     }
     if (partyOn) {
@@ -163,6 +166,7 @@ export class PartyRoom {
         const a = t * (0.8 + i * 0.3) + i * 2;
         spot.position.set(this.floorCenter.x + Math.cos(a) * 3, 2.2, this.floorCenter.z + Math.sin(a) * 3);
         spot.intensity = 6;
+        spot.visible = true;
       });
       if (this.panel) (this.panel.material as THREE.MeshStandardMaterial).emissive.setHex(NEON[Math.floor(t * 2) % NEON.length]!);
     }

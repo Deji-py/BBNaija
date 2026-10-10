@@ -31,6 +31,7 @@ export class DayNight {
   private readonly poolLight: THREE.PointLight;
   /** 0 at noon, 1 in the dead of night. */
   night = 0;
+  private lastMinute = Number.NaN;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -72,7 +73,10 @@ export class DayNight {
 
   /** `minutes`: house clock, minutes since midnight. */
   update(minutes: number): void {
-    const h = (((minutes % 1440) + 1440) % 1440) / 60;
+    const minute = Math.floor(minutes);
+    if (minute === this.lastMinute) return;
+    this.lastMinute = minute;
+    const h = (((minute % 1440) + 1440) % 1440) / 60;
     // Sun up from 6:00 to 19:00, highest at 12:30.
     const day = Math.max(0, Math.sin(((h - 6) / 13) * Math.PI));
     const twilight = Math.max(0, 1 - Math.min(Math.abs(h - 6.3), Math.abs(h - 19)) / 1.2);
@@ -91,9 +95,13 @@ export class DayNight {
     (this.stars.material as THREE.PointsMaterial).opacity = Math.max(0, this.night - 0.3);
 
     const lampsOn = this.night > 0.55;
-    for (const l of this.lampLights) l.intensity = lampsOn ? 6 : 0;
+    for (const l of this.lampLights) {
+      l.intensity = lampsOn ? 6 : 0;
+      l.visible = lampsOn;
+    }
     for (const head of this.lampHeads) head.material = lampsOn ? this.lampGlow : this.lampDark;
     this.poolLight.intensity = lampsOn ? 5 : 0;
+    this.poolLight.visible = lampsOn;
   }
 }
 

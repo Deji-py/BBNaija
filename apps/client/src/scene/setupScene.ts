@@ -9,10 +9,49 @@ export interface SceneContext {
   hemi: THREE.HemisphereLight;
 }
 
+/** Keep fill-rate predictable on Retina/large displays instead of blindly rendering at DPR 2. */
+function renderPixelRatio(width: number, height: number): number {
+  const deviceRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+  const maxDrawingBufferPixels = 1920 * 1080;
+  return Math.max(0.5, Math.min(deviceRatio, Math.sqrt(maxDrawingBufferPixels / Math.max(1, width * height))));
+}
+
+/**
+ * Standard materials pay for every visible point light. Keep the nearest few
+ * active; the sun and hemisphere light still provide whole-house illumination.
+ */
+function installPointLightBudget(scene: THREE.Scene, camera: THREE.Camera, maxVisible = 6): void {
+  let lights: THREE.PointLight[] | null = null;
+  let nextUpdate = 0;
+  const cameraPosition = new THREE.Vector3();
+  const lightPosition = new THREE.Vector3();
+
+  scene.onBeforeRender = () => {
+    const now = performance.now();
+    if (now < nextUpdate) return;
+    nextUpdate = now + 200;
+    if (!lights) {
+      lights = [];
+      scene.traverse((object) => {
+        if (object instanceof THREE.PointLight) lights!.push(object);
+      });
+    }
+
+    camera.getWorldPosition(cameraPosition);
+    const nearest = lights
+      .filter((light) => light.intensity > 0)
+      .map((light) => ({ light, distance: light.getWorldPosition(lightPosition).distanceToSquared(cameraPosition) }))
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, maxVisible);
+    const visible = new Set(nearest.map(({ light }) => light));
+    for (const light of lights) light.visible = visible.has(light);
+  };
+}
+
 /** Creates the renderer, scene, camera and lights, and keeps them sized to the window. */
 export function setupScene(container: HTMLElement): SceneContext {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(renderPixelRatio(window.innerWidth, window.innerHeight));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -33,7 +72,7 @@ export function setupScene(container: HTMLElement): SceneContext {
   sun.position.set(-12, 30, 18);
   sun.target.position.set(0, 0, 8);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(1024, 1024);
   const s = sun.shadow.camera;
   s.left = -26;
   s.right = 26;
@@ -43,10 +82,12 @@ export function setupScene(container: HTMLElement): SceneContext {
   s.far = 80;
   sun.shadow.bias = -0.0005;
   scene.add(sun, sun.target);
+  installPointLightBudget(scene, camera);
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
+    renderer.setPixelRatio(renderPixelRatio(window.innerWidth, window.innerHeight));
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
