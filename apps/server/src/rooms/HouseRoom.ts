@@ -930,7 +930,7 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
       if (!this.viewers.has(client.sessionId) || !REACTIONS.includes(emoji as Reaction)) return;
       if (!this.reactionLimiter.allow(client.sessionId)) return;
       const reaction: ReactionMessage = { emoji: emoji as Reaction };
-      this.sendToViewers(Msg.viewerReact, reaction);
+      this.sendToViewers(Msg.viewerReact, reaction, client.sessionId); // the sender already floated it
     });
 
     this.onMessage(Msg.vote, (client, message: unknown) => {
@@ -1227,8 +1227,8 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
     return undefined;
   }
 
-  private sendToViewers(type: string, message: unknown): void {
-    for (const c of this.clients) if (this.viewers.has(c.sessionId)) c.send(type, message);
+  private sendToViewers(type: string, message: unknown, except?: string): void {
+    for (const c of this.clients) if (this.viewers.has(c.sessionId) && c.sessionId !== except) c.send(type, message);
   }
 
   private sendToHousemates(type: string, message: unknown): void {

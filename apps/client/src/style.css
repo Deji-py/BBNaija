@@ -568,8 +568,7 @@ canvas:active {
   width: 100%;
   flex: none;
 }
-.chat.house-chat::before,
-.chat.viewer-chat::before {
+.chat.house-chat::before {
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
@@ -579,9 +578,6 @@ canvas:active {
 }
 .chat.house-chat::before {
   content: "House chat";
-}
-.chat.viewer-chat::before {
-  content: "Viewer chat";
 }
 .chat.viewer-chat .chat-list {
   max-height: 160px;
@@ -2734,8 +2730,7 @@ canvas:active {
 .round-panel,
 .spec-housemates,
 .spec-cams button,
-.spec-react button,
-.spec-drawer-toggle {
+.spec-react button {
   border: 1px solid var(--hud-line);
   background: var(--hud-glass);
   box-shadow: var(--hud-shadow);
@@ -3063,30 +3058,25 @@ canvas:active {
   bottom: var(--hud-bottom);
 }
 .spec-cams button,
-.spec-react button,
-.spec-drawer-toggle {
+.spec-react button {
   min-height: 40px;
   border-radius: 999px;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 .spec-cams button:hover,
-.spec-react button:hover,
-.spec-drawer-toggle:hover {
+.spec-react button:hover {
   border-color: rgb(255 255 255 / 0.28);
 }
 .spec-cams button.active {
   border-color: rgb(190 182 255 / 0.8);
   background: var(--hud-accent);
 }
-.spec-drawer-toggle {
-  display: none;
-  color: #fff;
-  font: 700 13px system-ui, sans-serif;
-  cursor: pointer;
+/* Reactions sit under the viewer chat's input. */
+.spec-right > .chat.viewer-chat {
+  order: 1;
 }
-.chat.live.house-chat {
-  bottom: calc(60px + var(--hud-bottom));
-  width: min(320px, calc(50% - 24px));
+.spec-right > .spec-react {
+  order: 2;
 }
 .spec-right > .chat.live.viewer-chat {
   width: 100%;
@@ -3095,8 +3085,46 @@ canvas:active {
 .spec-right > .chat.live.viewer-chat .chat-list {
   align-items: flex-end;
 }
+.spec-right > .chat.live.viewer-chat .chat-list {
+  font-size: 12px;
+}
+.spec-right > .chat.live.viewer-chat .chat-list li {
+  padding: 3px 9px;
+}
 .spec-right > .chat.live.viewer-chat .chat-input {
   width: 100%;
+  min-height: 34px;
+  padding: 6px 13px;
+  font-size: 13px;
+}
+/* Reactions: one slim pill bar instead of a row of separate bubbles. */
+.spec-right > .spec-react {
+  align-self: flex-end;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--hud-line);
+  border-radius: 999px;
+  background: var(--hud-glass);
+  -webkit-backdrop-filter: var(--hud-blur);
+  backdrop-filter: var(--hud-blur);
+}
+.spec-right > .spec-react button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  font-size: 16px;
+}
+.spec-right > .spec-react button:hover {
+  background: rgb(255 255 255 / 0.12);
 }
 
 /* Viewers: live captions (what the house doesn't know) stacked over games in progress. */
@@ -3111,6 +3139,60 @@ canvas:active {
   gap: 8px;
   width: min(360px, calc(100% - 340px));
   pointer-events: none;
+}
+/* House chat: a transcript card (top left), styled unlike the viewer chat's bubbles. */
+.house-chat-slot {
+  display: contents;
+}
+.spec-left .chat.live.house-chat {
+  position: static;
+  width: min(100%, 320px);
+  box-sizing: border-box;
+  gap: 4px;
+  padding: 6px 10px 7px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-left: 3px solid #2fbf71;
+  border-radius: 4px 12px 12px 4px;
+  background: rgb(6 16 12 / 0.62);
+  box-shadow: var(--hud-shadow);
+  -webkit-backdrop-filter: var(--hud-blur);
+  backdrop-filter: var(--hud-blur);
+}
+.spec-left .chat.live.house-chat:not(:has(.chat-list li:not(.faded))) {
+  display: none;
+}
+.spec-left .chat.live.house-chat::before {
+  content: "● In the house";
+  font: 700 10px system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-shadow: none;
+  color: #7fe0a8;
+}
+.spec-left .chat.live.house-chat .chat-list {
+  gap: 2px;
+  max-height: 120px;
+  font-size: 12px;
+}
+.spec-left .chat.live.house-chat .chat-list li {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  animation-name: house-line-in;
+}
+.spec-left .chat.live.house-chat .chat-list li.faded {
+  display: none;
+}
+.spec-left .chat.live.house-chat .chat-list b::after {
+  content: ":";
+}
+@keyframes house-line-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
 }
 .spec-left > .live-games {
   position: static;
@@ -3305,58 +3387,60 @@ button.caption:hover {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .spec-drawer-toggle {
-    display: block;
-    min-height: 34px;
-    padding: 5px 10px;
-  }
-  .admin-mode .spec-drawer-toggle {
-    display: none;
-  }
   .spec-audio {
     top: calc(var(--hud-top) + 76px);
     max-width: calc(100% - 24px);
     padding: 5px 8px;
     font-size: 11px;
   }
+  /* Phones: no drawer. Viewer chat and reactions float bottom left, above the cameras. */
   .spec-right {
-    display: none;
-    top: calc(var(--hud-top) + 112px);
-    right: var(--hud-right);
+    top: auto;
+    right: auto;
+    left: var(--hud-left);
     bottom: calc(64px + var(--hud-bottom));
-    width: min(330px, calc(100% - 24px));
-    padding: 8px;
-    border: 1px solid var(--hud-line);
-    border-radius: 16px;
-    background: var(--hud-glass-strong);
-    box-shadow: 0 18px 60px rgb(0 0 0 / 0.42);
-    -webkit-backdrop-filter: blur(18px);
-    backdrop-filter: blur(18px);
-    box-sizing: border-box;
-    z-index: 8;
+    width: min(330px, calc(100% - var(--hud-left) - var(--hud-right)));
+    gap: 6px;
+    pointer-events: none;
   }
-  .spec-right.open {
-    display: flex;
-  }
-  .spec-housemates {
-    max-height: 42%;
-    background: rgb(255 255 255 / 0.04);
-    box-shadow: none;
-  }
-  .spec-right > .spec-floats {
+  .spec-right > .spec-housemates {
     display: none;
+  }
+  /* Reactions rise from just above the viewer chat. */
+  .spec-right > .spec-floats {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    height: 42dvh;
+  }
+  .spec-right .float-emoji {
+    font-size: 26px;
   }
   .spec-right > .chat.live.viewer-chat {
     width: 100%;
     min-height: 0;
   }
-  .spec-react {
-    justify-content: center;
-    overflow-x: auto;
+  .spec-right > .chat.live.viewer-chat .chat-list {
+    align-items: flex-start;
+    max-height: min(130px, 20dvh);
   }
-  .spec-react button {
-    min-width: 42px;
-    min-height: 42px;
+  .spec-right > .chat.live.viewer-chat .chat-input {
+    min-height: 36px;
+    font-size: 13px;
+  }
+  .spec-right > .spec-react {
+    align-self: flex-start;
+    max-width: 100%;
+    overflow-x: auto;
+    pointer-events: auto;
+    scrollbar-width: none;
+  }
+  .spec-right > .spec-react button {
+    flex: none;
+    width: 34px;
+    height: 34px;
+    font-size: 17px;
   }
   .spec-cams {
     left: 0;
@@ -3384,16 +3468,30 @@ button.caption:hover {
   .spec-cams kbd {
     display: none;
   }
-  .chat.live.house-chat {
-    bottom: calc(64px + var(--hud-bottom));
-    width: min(300px, calc(100% - 24px));
+  .spec-left .chat.live.house-chat {
+    width: min(100%, 270px);
+    padding: 5px 9px 6px;
   }
+  .spec-left .chat.live.house-chat .chat-list {
+    max-height: 64px;
+    font-size: 11px;
+  }
+  /* A broadcast Diary Room session takes the house chat's place at the top. */
   .spectator-hud ~ .chat.diary-chat {
-    bottom: calc(64px + var(--hud-bottom));
-    width: calc(100% - 24px);
+    top: calc(var(--hud-top) + 108px);
+    bottom: auto;
+    left: var(--hud-left);
+    transform: none;
+    width: min(300px, calc(100% - var(--hud-left) - var(--hud-right)));
+  }
+  .game:has(.spectator-hud ~ .chat.diary-chat:not([hidden])) .spec-left .chat.live.house-chat {
+    display: none;
+  }
+  .game:has(.spectator-hud ~ .chat.diary-chat:not([hidden])) .spec-left {
+    top: calc(var(--hud-top) + 230px);
   }
   .spec-left {
-    top: calc(var(--hud-top) + 104px);
+    top: calc(var(--hud-top) + 108px);
     width: min(320px, calc(100% - 24px));
   }
   .caption {
@@ -3446,7 +3544,6 @@ button.caption:hover {
   .spec-housemates,
   .spec-cams button,
   .spec-react button,
-  .spec-drawer-toggle,
   .chat-input,
   .chat.live .chat-list li,
   .emote-toggle,

@@ -72,6 +72,9 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
   const leftColumn = document.createElement("div");
   leftColumn.className = "spec-left";
   container.append(leftColumn);
+  const houseChatSlot = document.createElement("div");
+  houseChatSlot.className = "house-chat-slot";
+  leftColumn.append(houseChatSlot);
   const captions = new CaptionFeed(leftColumn, (ids) => {
     const id = ids.find((i) => players.remotes.has(i));
     if (id) setCamera({ kind: "follow", playerId: id });
@@ -107,6 +110,7 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
   const hud = new SpectatorHud(container, {
     onCamera: setCamera,
     onReact: (emoji) => {
+      hud.floatReaction(emoji);
       const message: ReactionMessage = { emoji };
       room.send(Msg.viewerReact, message);
     },
@@ -158,14 +162,14 @@ export function startSpectatorMode(container: HTMLElement, room: HouseRoom, audi
   });
 
   // House chat is visible to viewers (read-only); viewer chat is only ever sent to viewers.
-  const houseChat = new ChatPanel(container, () => {}, { className: "house-chat", label: "House chat", readOnly: true, live: true });
+  const houseChat = new ChatPanel(houseChatSlot, () => {}, { className: "house-chat", label: "House chat", readOnly: true, live: true });
   const viewerChat = new ChatPanel(
     hud.rightColumn,
     (text) => {
       const message: ChatSendMessage = { text };
       room.send(Msg.viewerChat, message);
     },
-    { className: "viewer-chat", label: "Viewer chat", placeholder: "Chat with other viewers (Enter)", live: true },
+    { className: "viewer-chat", label: "Viewer chat", placeholder: matchMedia("(pointer: coarse)").matches ? "Chat with viewers…" : "Chat with viewers (Enter)", live: true },
   );
   room.onMessage(Msg.chat, (msg: ChatMessage) => {
     houseChat.add(msg);

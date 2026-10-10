@@ -17,7 +17,7 @@ export class SpectatorHud {
   private readonly camButtons = new Map<string, HTMLButtonElement>();
   private readonly audioEl: HTMLElement;
   private readonly floatLayer: HTMLElement;
-  /** Right-hand column; the viewer chat panel is placed at its bottom. */
+  /** Right-hand column (bottom left on phones); the viewer chat goes in it, above the reactions. */
   readonly rightColumn: HTMLElement;
   private lastListKey = "";
 
@@ -40,9 +40,8 @@ export class SpectatorHud {
         <span class="live-badge">LIVE</span>
         <span class="hud-pill spec-count"></span>
         <span class="hud-pill spec-cam"></span>
-        <button type="button" class="spec-drawer-toggle" aria-expanded="false" aria-controls="spectator-details">People & chat</button>
       </div>
-      <div class="spec-right" id="spectator-details">
+      <div class="spec-right">
         <aside class="spec-housemates" aria-label="Housemates">
           <h2>Housemates</h2>
           <ul></ul>
@@ -60,12 +59,6 @@ export class SpectatorHud {
     this.audioEl = el.querySelector(".spec-audio")!;
     this.floatLayer = el.querySelector(".spec-floats")!;
     this.rightColumn = el.querySelector(".spec-right")!;
-    const drawerToggle = el.querySelector<HTMLButtonElement>(".spec-drawer-toggle")!;
-    drawerToggle.addEventListener("click", () => {
-      const open = this.rightColumn.classList.toggle("open");
-      drawerToggle.setAttribute("aria-expanded", String(open));
-      drawerToggle.textContent = open ? "Close panel" : "People & chat";
-    });
     if (options.housemates === false) el.querySelector<HTMLElement>(".spec-housemates")!.hidden = true;
     if (options.reactions === false) el.querySelector<HTMLElement>(".spec-react")!.hidden = true;
 
