@@ -11,3 +11,9 @@ services:
         sync: false
       - key: ADMIN_SECRET
         generateValue: true
+      - key: BREVO_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_FROM_NAME
+        value: Big Brother Ninja

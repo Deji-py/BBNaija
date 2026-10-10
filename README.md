@@ -260,8 +260,9 @@ That regenerates the Prisma client for Postgres and creates missing tables. It w
 2. Create a free Postgres project at [Neon](https://neon.com/) and copy its connection string.
 3. In Render, choose **New → Blueprint**, connect the repository, and let Render read `render.yaml`.
 4. Paste the Neon connection string when Render asks for `DATABASE_URL`. Render generates `ADMIN_SECRET` and supplies `PORT` and `RENDER_EXTERNAL_URL` automatically.
-5. When deployment finishes, copy the generated `ADMIN_SECRET` from the service's **Environment** page and keep it somewhere safe; it opens the platform-admin console.
-6. Wait for `/health` to report `{"ok":true,...}`, then open the service's `onrender.com` URL.
+5. Create a free [Brevo](https://www.brevo.com/) account. Under **Settings → Senders, Domains & Dedicated IPs → Senders**, add an email address and verify the code Brevo sends it. Create an API key, then add `BREVO_API_KEY`, `EMAIL_FROM` (the exact verified address), and `EMAIL_FROM_NAME` to Render.
+6. When deployment finishes, copy the generated `ADMIN_SECRET` from the service's **Environment** page and keep it somewhere safe; it opens the platform-admin console.
+7. Wait for `/health` to report `{"ok":true,...}`, then open the service's `onrender.com` URL and request a sign-in link to test delivery.
 
 Render's free service sleeps after 15 idle minutes, so the first request after a quiet period can take about a minute. Its filesystem is temporary: database-backed accounts, seasons, votes, tasks, and event history persist in Neon, but uploaded TV videos do not survive a restart. Do not use Render's free Postgres for a season you want to keep; those databases expire after 30 days.
 
@@ -278,6 +279,9 @@ The older `fly.toml` remains available if you later move to paid, always-on Fly.
 | `DATABASE_URL` | server | `file:./data/house.db` | SQLite locally; `postgres://` or `postgresql://` selects Postgres |
 | `PUBLIC_URL` | server | `RENDER_EXTERNAL_URL` on Render; otherwise required in production | Site address used in sign-in links and payment returns |
 | `VITE_SERVER_URL` | client | Production page origin; `<page origin>/colyseus` in development | Override the game server URL |
+| `BREVO_API_KEY` | server | unset | Brevo transactional-email API key; required for production sign-in |
+| `EMAIL_FROM` | server | unset | Exact sender email verified in Brevo |
+| `EMAIL_FROM_NAME` | server | `Big Brother Ninja` | Sender name shown on magic-link emails |
 | `LIVEKIT_URL` | server | unset (mesh) | Browser-reachable LiveKit address (`ws://` or `wss://`) |
 | `LIVEKIT_API_KEY` | server | unset | LiveKit API key |
 | `LIVEKIT_API_SECRET` | server | unset | LiveKit API secret |

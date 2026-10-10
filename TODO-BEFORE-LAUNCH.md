@@ -12,7 +12,7 @@ Local play (`pnpm dev`) does not need any of this. The code for LiveKit, Postgre
 
 ## Before anyone is charged or the site is public
 
-- [ ] Add an email provider. Production does not print sign-in links on the page, so magic links will not work until mail is sent.
+- [ ] Create and verify a Brevo sender, then set `BREVO_API_KEY`, `EMAIL_FROM`, and `EMAIL_FROM_NAME` in Render. The production magic-link integration is already wired.
 - [ ] Change the placeholder pack price (₦500 for 5 extra votes) in `packages/shared/src/payments.ts`.
 - [ ] Check paid-voting and consumer rules for Nigeria (and any other country you accept). Add a terms page Paystack and players can see.
 - [ ] Confirm the Paystack webhook (`POST /api/payments/webhook`) against the raw request body. The watch-page return already marks a pack paid; the webhook is the backup if someone closes the tab first.

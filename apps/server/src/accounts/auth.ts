@@ -1,6 +1,7 @@
 import { LOGIN_LINK_MINUTES, SESSION_DAYS, isValidEmail, type PublicUser } from "@bbn/shared";
 import { PUBLIC_URL, isProduction } from "../config.js";
 import { db } from "../db/client.js";
+import { emailConfigured, sendSignInEmail } from "../email/brevo.js";
 import { RateLimiter } from "../systems/rateLimit.js";
 import { hashToken, newToken } from "./tokens.js";
 
@@ -21,15 +22,14 @@ export function toPublicUser(u: { id: string; email: string; displayName: string
 }
 
 /**
- * Starts a magic-link sign-in. Production would email the link (M9 adds an
- * email provider); in development there's no email, so the link is returned to
- * the page and printed in the server log.
+ * Starts a magic-link sign-in. Production sends it through Brevo; development
+ * returns it to the page and prints it in the server log.
  */
 export async function requestLoginLink(rawEmail: unknown, requestOrigin: string | null): Promise<{ devLink?: string }> {
   const email = typeof rawEmail === "string" ? rawEmail.trim().toLowerCase() : "";
   if (!isValidEmail(email)) throw new AuthError("BAD_REQUEST", "Please enter a valid email address.");
   if (!linkLimiter.allow(email)) throw new AuthError("TOO_MANY_REQUESTS", "Too many sign-in links. Try again in a few minutes.");
-  if (isProduction) throw new AuthError("SERVICE_UNAVAILABLE", "Email sign-in isn't set up yet.");
+  if (isProduction && !emailConfigured()) throw new AuthError("SERVICE_UNAVAILABLE", "Email sign-in isn't set up yet.");
 
   const token = newToken();
   await db.loginToken.create({
@@ -39,6 +39,15 @@ export async function requestLoginLink(rawEmail: unknown, requestOrigin: string 
   // or an attacker could get a victim's link pointed at their own site.
   const base = PUBLIC_URL ?? safeOrigin(requestOrigin) ?? "http://localhost:5173";
   const link = `${base}/auth?token=${encodeURIComponent(token)}`;
+  if (isProduction) {
+    try {
+      await sendSignInEmail(email, link);
+    } catch (err) {
+      console.error(`[auth] sign-in email failed: ${err instanceof Error ? err.message : "unknown error"}`);
+      throw new AuthError("SERVICE_UNAVAILABLE", "We couldn't send the sign-in email. Please try again.");
+    }
+    return {};
+  }
   console.log(`[auth] sign-in link for ${email}: ${link}`);
   return { devLink: link };
 }
