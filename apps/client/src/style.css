@@ -84,7 +84,7 @@ canvas:active {
   display: grid;
   place-items: center;
   padding: 16px;
-  background: radial-gradient(circle at 50% 30%, #2a2340, #12121a 70%);
+  background: #0c0c0e;
   z-index: 10;
 }
 .card {
@@ -92,17 +92,20 @@ canvas:active {
   box-sizing: border-box;
   padding: 28px;
   border-radius: 16px;
-  background: #1d1b29;
+  background: #111114;
+  border: 1px solid rgb(255 255 255 / 0.08);
   box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
   text-align: left;
 }
 .card h1,
 .card h2 {
   margin: 0 0 6px;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  letter-spacing: -0.02em;
 }
 .muted {
   margin: 0 0 20px;
-  color: #a3a0b8;
+  color: #9a988f;
 }
 .field {
   display: block;
@@ -121,14 +124,14 @@ canvas:active {
   width: 100%;
   box-sizing: border-box;
   padding: 10px 12px;
-  border: 1px solid #3a3650;
-  border-radius: 8px;
-  background: #12111b;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 10px;
+  background: rgb(0 0 0 / 0.45);
   color: #fff;
   font-size: 16px;
 }
 .field input[name="name"]:focus {
-  outline: 2px solid #7b6cf6;
+  outline: 2px solid #e0243b;
   outline-offset: 1px;
 }
 .swatches {
@@ -160,8 +163,8 @@ canvas:active {
   width: 100%;
   padding: 12px;
   border: 0;
-  border-radius: 8px;
-  background: #7b6cf6;
+  border-radius: 10px;
+  background: #e0243b;
   color: #fff;
   font-size: 16px;
   font-weight: 600;
@@ -358,7 +361,7 @@ canvas:active {
   text-align: center;
 }
 .switch-link a {
-  color: #b3a8ff;
+  color: #e0243b;
 }
 
 /* --- Spectator HUD --- */
@@ -1290,7 +1293,7 @@ canvas:active {
 /* --- Plain pages: landing, sign in, apply --- */
 .page {
   min-height: 100vh;
-  background: radial-gradient(circle at 50% 0%, #2a2340, #12121a 60%);
+  background: #0c0c0e;
 }
 .site-header {
   display: flex;
@@ -1298,36 +1301,38 @@ canvas:active {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  max-width: 960px;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 18px 20px 16px;
+  border-bottom: 1px solid #222228;
 }
 .brand {
-  color: #fff;
-  font-weight: 800;
-  font-size: 20px;
+  color: #f4f1ea;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-weight: 700;
+  font-size: 22px;
   text-decoration: none;
-  letter-spacing: 0.02em;
+  letter-spacing: -0.02em;
 }
 .brand span {
-  color: #ff5c74;
+  color: #e0243b;
+  font-style: italic;
 }
 .site-header nav {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
   flex-wrap: wrap;
 }
 .site-header nav a,
 .link-button {
-  color: #d9d5ef;
+  color: #b8b6ae;
   text-decoration: none;
-  font-size: 15px;
+  font-size: 14px;
 }
 .site-header nav a:hover,
 .link-button:hover {
-  color: #fff;
-  text-decoration: underline;
+  color: #f4f1ea;
 }
 .site-header .who {
   display: flex;
@@ -1350,6 +1355,336 @@ canvas:active {
   margin: 0 auto;
   padding: 16px 16px 64px;
   box-sizing: border-box;
+}
+.listings-mast {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 8px 0 18px;
+  padding: 20px 0 16px;
+  border-bottom: 1px solid #222228;
+}
+.listings-mast h1 {
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  color: #f4f1ea;
+}
+.listings-meta {
+  margin: 6px 0 0;
+  color: #8c8a84;
+  font-size: 14px;
+}
+.listings-kicker {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8c8a84;
+}
+.listings-block {
+  margin: 36px 0 8px;
+}
+.you-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 16px 0 0;
+  padding: 12px 0;
+  border-bottom: 1px solid #222228;
+}
+.you-strip p {
+  margin: 0;
+  flex: 1;
+  min-width: 200px;
+  color: #c4c2ba;
+  font-size: 14px;
+}
+.you-strip.in p {
+  color: #f4f1ea;
+  font-weight: 600;
+}
+.you-strip .button {
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: #e0243b;
+}
+.you-strip .button.secondary {
+  background: transparent;
+  color: #f4f1ea;
+  border: 1px solid #3a3a40;
+}
+.host-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.4fr);
+  gap: 24px 32px;
+  align-items: end;
+  width: 100vw;
+  max-width: 100vw;
+  margin: 0 calc(50% - 50vw) 8px;
+  padding: 20px max(20px, calc((100vw - 1200px) / 2 + 20px)) 28px;
+  box-sizing: border-box;
+  border: 0;
+  border-bottom: 1px solid rgb(255 255 255 / 0.06);
+  border-radius: 0;
+  background: rgb(5 5 7 / 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: none;
+}
+.host-card-art {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.4);
+  background: #050507;
+}
+.host-card-art img {
+  display: block;
+  width: 100%;
+  height: 280px;
+  object-fit: cover;
+  object-position: center 72%;
+}
+.host-card-copy h2 {
+  margin: 0 0 8px;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.host-card-copy .muted {
+  margin: 0;
+  color: #9a988f;
+  max-width: 36em;
+}
+.host-card-actions {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+}
+.host-card .button {
+  border-radius: 10px;
+  background: #e0243b;
+  padding: 12px 20px;
+}
+.host-card .field {
+  margin: 0;
+}
+.host-card .field > span {
+  color: #8c8a84;
+  margin-bottom: 6px;
+}
+.host-card .field input {
+  border-color: rgb(255 255 255 / 0.1);
+  border-radius: 10px;
+  background: rgb(0 0 0 / 0.45);
+}
+.host-card .field input:focus {
+  outline-color: #e0243b;
+}
+.host-form {
+  display: grid;
+  grid-template-columns: 1fr 120px auto;
+  gap: 10px 12px;
+  align-items: end;
+}
+.host-form .field:first-child {
+  grid-column: 1;
+}
+.host-form .field:nth-child(2) {
+  grid-column: 2;
+}
+.host-form button {
+  grid-column: 3;
+  border: 0;
+  border-radius: 10px;
+  background: #e0243b;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  padding: 12px 18px;
+  cursor: pointer;
+  height: 44px;
+}
+.host-form .error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.host-card .host-result {
+  grid-column: 1 / -1;
+}
+@media (max-width: 760px) {
+  .host-card {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 14px 14px 18px;
+  }
+  .host-card-art img {
+    height: 140px;
+  }
+  .host-card-copy h2 {
+    font-size: 20px;
+  }
+  .host-card-copy .muted {
+    font-size: 13px;
+  }
+  .host-form {
+    grid-template-columns: 1fr 88px;
+    gap: 8px;
+  }
+  .host-form button,
+  .host-form .error {
+    grid-column: 1 / -1;
+  }
+  .host-form button,
+  .host-card .button {
+    height: 36px;
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  .host-card-actions {
+    justify-content: stretch;
+  }
+  .host-card-actions .button,
+  .host-card .share-box .button {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+  }
+  .host-card .field > span {
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+  .host-card .field input {
+    font-size: 14px;
+    padding: 8px 10px;
+    height: 36px;
+  }
+  .you-strip {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .you-strip p {
+    min-width: 0;
+    font-size: 13px;
+  }
+  .you-strip .button {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    height: 36px;
+    padding: 8px 12px;
+    font-size: 13px;
+    line-height: 20px;
+  }
+}
+@media (max-width: 560px) {
+  .brand {
+    font-size: 17px;
+  }
+  .site-header {
+    padding: 12px 14px 10px;
+  }
+  .site-header nav a,
+  .link-button,
+  .muted-inline {
+    font-size: 12px;
+  }
+  .listings-mast h1 {
+    font-size: 22px;
+  }
+  .listings-meta,
+  .listings-kicker,
+  .card-host,
+  .card-housemates,
+  .apply-card p {
+    font-size: 12px;
+  }
+  .card-info h3,
+  .apply-card h3 {
+    font-size: 14px;
+  }
+  .card {
+    padding: 18px;
+  }
+  .card h1,
+  .card h2 {
+    font-size: 22px;
+  }
+  .card .muted,
+  .muted {
+    font-size: 13px;
+  }
+  .card button,
+  .button {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  .field > span,
+  .field > legend {
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+  .field input:not([type="checkbox"]):not([type="radio"]),
+  .field textarea,
+  .field input[name="name"] {
+    font-size: 14px;
+    padding: 8px 10px;
+  }
+  .share-row {
+    flex-direction: column;
+  }
+}
+.share-box {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgb(47 191 113 / 0.45);
+  background: rgb(47 191 113 / 0.08);
+}
+.share-title {
+  margin: 0 0 6px;
+  font-weight: 700;
+}
+.share-row {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+.share-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #3a3650;
+  border-radius: 8px;
+  background: #12111b;
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+}
+.share-row button {
+  flex: none;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #2fbf71;
+  color: #0b1a12;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
 .hero {
   padding: 32px 0 16px;
@@ -1380,13 +1715,15 @@ canvas:active {
   display: inline-block;
   padding: 12px 20px;
   border-radius: 10px;
-  background: #7b6cf6;
+  background: #e0243b;
   color: #fff;
   font-weight: 600;
   text-decoration: none;
 }
 .button.secondary {
-  background: #2c2942;
+  background: transparent;
+  border: 1px solid #3a3a40;
+  color: #f4f1ea;
 }
 .center {
   text-align: center;
@@ -1414,9 +1751,9 @@ canvas:active {
   width: 100%;
   box-sizing: border-box;
   padding: 10px 12px;
-  border: 1px solid #3a3650;
-  border-radius: 8px;
-  background: #12111b;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 10px;
+  background: rgb(0 0 0 / 0.45);
   color: #fff;
   font: inherit;
   font-size: 16px;
@@ -1426,7 +1763,7 @@ canvas:active {
 }
 .field input:focus,
 .field textarea:focus {
-  outline: 2px solid #7b6cf6;
+  outline: 2px solid #e0243b;
   outline-offset: 1px;
 }
 .consents .check {
@@ -1440,12 +1777,12 @@ canvas:active {
 .dev-box {
   margin-top: 12px;
   padding: 12px;
-  border: 1px dashed #b3a8ff;
+  border: 1px dashed rgb(224 36 59 / 0.45);
   border-radius: 10px;
 }
 .dev-note {
   margin: 0 0 10px;
-  color: #b3a8ff;
+  color: #c9c5ba;
   font-size: 14px;
 }
 
@@ -1562,7 +1899,7 @@ canvas:active {
   font-size: 14px;
 }
 .lobby-hint .link-button {
-  color: #b3a8ff;
+  color: #e0243b;
   text-decoration: underline;
 }
 
@@ -1578,48 +1915,35 @@ canvas:active {
   font-size: 20px;
 }
 .live-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: #e0243b;
-  box-shadow: 0 0 0 0 rgb(224 36 59 / 0.6);
-  animation: live-pulse 1.6s infinite;
-}
-@keyframes live-pulse {
-  70% {
-    box-shadow: 0 0 0 8px rgb(224 36 59 / 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgb(224 36 59 / 0);
-  }
 }
 .house-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 20px;
+  gap: 28px 20px;
 }
 .grid-empty {
   grid-column: 1 / -1;
-  padding: 32px;
-  border-radius: 12px;
-  background: #1d1b29;
-  color: #a3a0b8;
-  text-align: center;
+  padding: 28px 0;
+  color: #8c8a84;
+  border-top: 1px solid #222228;
+  border-bottom: 1px solid #222228;
 }
 .house-card {
   display: block;
-  color: #fff;
+  color: #f4f1ea;
   text-decoration: none;
-  border-radius: 12px;
   outline: none;
 }
 .house-card .thumb {
   position: relative;
   aspect-ratio: 16 / 9;
-  border-radius: 12px;
   overflow: hidden;
-  background: #1d1b29;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  background: #161618;
+  border: 1px solid #222228;
 }
 .house-card canvas {
   display: block;
@@ -1630,12 +1954,11 @@ canvas:active {
 }
 .house-card:hover .thumb,
 .house-card:focus-visible .thumb {
-  transform: translate(4px, -4px);
-  box-shadow: -6px 6px 0 #7b6cf6;
+  border-color: #e0243b;
 }
 .house-card:hover canvas,
 .house-card:focus-visible canvas {
-  filter: brightness(0.55);
+  filter: brightness(0.72);
 }
 .thumb-live,
 .thumb-viewers {
@@ -1674,19 +1997,20 @@ canvas:active {
   position: absolute;
   left: 50%;
   top: 50%;
-  transform: translate(-50%, -50%) scale(0.9);
-  padding: 10px 18px;
-  border-radius: 999px;
-  background: #7b6cf6;
+  transform: translate(-50%, -50%);
+  padding: 8px 14px;
+  background: #e0243b;
+  font-size: 13px;
   font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   opacity: 0;
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity 0.15s ease;
   pointer-events: none;
 }
 .house-card:hover .watch-now,
 .house-card:focus-visible .watch-now {
   opacity: 1;
-  transform: translate(-50%, -50%) scale(1);
 }
 @media (hover: none) {
   /* Touch screens have no hover: always show the button. */
@@ -1746,21 +2070,19 @@ canvas:active {
 }
 .apply-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0 32px;
 }
 .apply-card {
   display: block;
-  padding: 14px;
-  border-radius: 12px;
-  background: #1d1b29;
-  color: #fff;
+  padding: 14px 0;
+  color: #f4f1ea;
   text-decoration: none;
-  border: 1px solid #2c2942;
+  border-top: 1px solid #222228;
 }
 .apply-card:hover,
 .apply-card:focus-visible {
-  border-color: #7b6cf6;
+  border-top-color: #e0243b;
 }
 .apply-card h3 {
   margin: 0 0 4px;
@@ -1772,7 +2094,7 @@ canvas:active {
   font-size: 13px;
 }
 .apply-cta {
-  color: #b3a8ff;
+  color: #e0243b;
   font-weight: 600;
   font-size: 14px;
 }
@@ -1794,8 +2116,8 @@ canvas:active {
 .console-home .page-card button {
   padding: 10px 14px;
   border: 0;
-  border-radius: 8px;
-  background: #7b6cf6;
+  border-radius: 10px;
+  background: #e0243b;
   color: #fff;
   font: inherit;
   font-weight: 600;
@@ -1838,8 +2160,8 @@ canvas:active {
   cursor: pointer;
 }
 .season-admin button.primary {
-  background: #7b6cf6;
-  border-color: #7b6cf6;
+  background: #e0243b;
+  border-color: #e0243b;
 }
 .season-admin button:disabled {
   opacity: 0.45;
@@ -1859,6 +2181,20 @@ canvas:active {
 @media (max-width: 600px) {
   .season-list li {
     flex-wrap: wrap;
+  }
+  .season-buttons {
+    width: 100%;
+  }
+  .season-buttons button {
+    flex: 1;
+    text-align: center;
+  }
+  .console-home .page-card button {
+    width: 100%;
+    box-sizing: border-box;
+    height: 36px;
+    padding: 8px 12px;
+    font-size: 13px;
   }
 }
 

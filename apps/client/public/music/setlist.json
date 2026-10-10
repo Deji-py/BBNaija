@@ -1,0 +1,34 @@
+{
+  "tracks": [
+    {
+      "file": "ikeja-heat.wav",
+      "title": "Ikeja Heat",
+      "artist": "DJ Ninja",
+      "duration": 65.2
+    },
+    {
+      "file": "lagos-lights.wav",
+      "title": "Lagos Lights",
+      "artist": "DJ Ninja",
+      "duration": 63.42
+    },
+    {
+      "file": "last-dance.wav",
+      "title": "Last Dance",
+      "artist": "DJ Ninja",
+      "duration": 54.08
+    },
+    {
+      "file": "waka-body.wav",
+      "title": "Waka Body",
+      "artist": "DJ Ninja",
+      "duration": 61.2
+    },
+    {
+      "file": "yard-log.wav",
+      "title": "Yard Log",
+      "artist": "DJ Ninja",
+      "duration": 64.36
+    }
+  ]
+}

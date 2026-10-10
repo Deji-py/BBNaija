@@ -1,6 +1,8 @@
 import * as THREE from "three";
-import { FURNITURE, type PartyEffect } from "@bbn/shared";
+import { FURNITURE, encodeLook, type Look, type PartyEffect } from "@bbn/shared";
+import { Avatar } from "../entities/avatar.js";
 import { HouseRadio } from "./houseRadio.js";
+import { PartyMix, loadSetlist } from "../audio/partyMix.js";
 import { box, mat } from "./materials.js";
 
 /**
@@ -9,6 +11,9 @@ import { box, mat } from "./materials.js";
  * party effects anyone at the booth can fire: confetti over the dance floor and
  * fireworks over the garden.
  */
+
+/** Headphones, gold chain, shades and a hot pink top. Indices into LOOK_SLOTS. */
+const DJ_LOOK: Look = { body: 0, skin: 0, hair: 2, hairColor: 0, top: 6, bottom: 1, shoes: 0, hat: 0, glasses: 2, neck: 1, ears: 2, back: 0, wrist: 1 };
 
 const NEON = [0xff2fd6, 0x22d3ee, 0xfacc15, 0x7c3aed, 0x22c55e, 0xf97316];
 const TILE = 1;
@@ -82,6 +87,14 @@ export function buildPartyModel(g: THREE.Group, kind: string, w: number, d: numb
   return false;
 }
 
+/** What the room state says about the party. */
+export interface PartyState {
+  partyOn: boolean | undefined;
+  partyStartedAt: number;
+  partySeed: number;
+  serverTime: number;
+}
+
 interface Particle {
   mesh: THREE.Mesh;
   v: THREE.Vector3;
@@ -97,7 +110,11 @@ export class PartyRoom {
   private readonly particles: Particle[] = [];
   private readonly confettiGeo = new THREE.PlaneGeometry(0.08, 0.05);
   private readonly sparkGeo = new THREE.SphereGeometry(0.08, 6, 4);
+  /** The drum loop, for when there are no tracks in /music. */
   private radio: HouseRadio | null = null;
+  private mix: PartyMix | null = null;
+  private lastServerTime = 0;
+  private readonly dj: Avatar | null = null;
   private time = 0;
   private on = false;
   private readonly floorCenter: THREE.Vector3;
@@ -124,18 +141,55 @@ export class PartyRoom {
       this.spots.push(spot);
     }
     for (const { beam } of this.heads) beam.visible = false;
+    // The resident DJ stands where the "dj" furniture is (on the stage, behind the decks), which also makes him solid.
+    const spot = FURNITURE.find((f) => f.kind === "dj");
+    if (spot) {
+      this.dj = new Avatar("DJ Ninja", 0xff2fd6, encodeLook(DJ_LOOK));
+      this.dj.root.position.set(spot.x, 0.3, spot.z);
+      this.dj.root.rotation.y = spot.facing ?? 0;
+      root.add(this.dj.root);
+    }
   }
 
-  /** Party music plays from the DJ booth's speakers. */
+  /** Party music plays from the DJ booth's speakers: the DJ's mix, or a drum loop without tracks. */
   attach(ctx: AudioContext): void {
     const booth = FURNITURE.find((f) => f.id === "dj-booth");
-    this.radio = new HouseRadio(ctx, { x: booth?.x ?? -29, y: 1.6, z: booth?.z ?? 0 });
-    this.radio.setStation("drums");
+    const at = { x: booth?.x ?? -29, y: 1.6, z: booth?.z ?? 0 };
+    void loadSetlist().then((tracks) => {
+      if (tracks.length === 0) {
+        this.radio = new HouseRadio(ctx, at);
+        this.radio.setStation("drums");
+        this.radio.setPlaying(this.on);
+        return;
+      }
+      const speakers = ctx.createPanner();
+      speakers.panningModel = "HRTF";
+      // Linear: full volume across the dance floor, then a fade into the next rooms.
+      speakers.distanceModel = "linear";
+      speakers.refDistance = 12;
+      speakers.maxDistance = 36;
+      speakers.rolloffFactor = 1;
+      speakers.positionX.value = at.x;
+      speakers.positionY.value = at.y;
+      speakers.positionZ.value = at.z;
+      speakers.connect(ctx.destination);
+      this.mix = new PartyMix(ctx, speakers, tracks);
+    });
   }
 
-  update(dt: number, partyOn: boolean): void {
+  update(dt: number, state: PartyState): void {
     this.time += dt;
     const t = this.time;
+    const partyOn = !!state.partyOn;
+    this.dj?.update(dt, 0, partyOn ? "dance" : "idle");
+    if (this.mix) {
+      if (state.serverTime && state.serverTime !== this.lastServerTime) {
+        this.lastServerTime = state.serverTime;
+        this.mix.syncClock(state.serverTime);
+      }
+      this.mix.setParty(partyOn, state.partyStartedAt, state.partySeed);
+      this.mix.update();
+    }
     if (partyOn !== this.on) {
       this.on = partyOn;
       this.radio?.setPlaying(partyOn);
@@ -149,11 +203,13 @@ export class PartyRoom {
       }
     }
     if (partyOn) {
-      // Floor: a travelling pattern of colours on the beat (~120 bpm).
-      const beat = Math.floor(t * 2);
+      // Floor: a travelling pattern of colours on the beat: the music's kicks with the DJ's
+      // mix, otherwise a steady ~120 bpm.
+      const beat = this.mix ? this.mix.beats : Math.floor(t * 2);
+      const throb = this.mix ? 0.35 + 0.65 * this.mix.kick : 0.6 + 0.4 * Math.abs(Math.sin(t * Math.PI * 2));
       this.tiles.forEach((tile, i) => {
         const c = (i + beat + Math.floor(i / 8)) % NEON.length;
-        const pulse = ((i * 7 + beat) % 3 === 0 ? 1 : 0.35) * (0.6 + 0.4 * Math.abs(Math.sin(t * Math.PI * 2)));
+        const pulse = ((i * 7 + beat) % 3 === 0 ? 1 : 0.35) * throb;
         (tile.material as THREE.MeshStandardMaterial).emissive.setHex(NEON[c]!).multiplyScalar(pulse);
       });
       if (this.ball) this.ball.rotation.y += dt * 0.8;
@@ -165,10 +221,10 @@ export class PartyRoom {
       this.spots.forEach((spot, i) => {
         const a = t * (0.8 + i * 0.3) + i * 2;
         spot.position.set(this.floorCenter.x + Math.cos(a) * 3, 2.2, this.floorCenter.z + Math.sin(a) * 3);
-        spot.intensity = 6;
+        spot.intensity = this.mix ? 3 + 5 * this.mix.kick : 6;
         spot.visible = true;
       });
-      if (this.panel) (this.panel.material as THREE.MeshStandardMaterial).emissive.setHex(NEON[Math.floor(t * 2) % NEON.length]!);
+      if (this.panel) (this.panel.material as THREE.MeshStandardMaterial).emissive.setHex(NEON[beat % NEON.length]!);
     }
     // Effects.
     for (let i = this.particles.length - 1; i >= 0; i--) {
@@ -185,6 +241,10 @@ export class PartyRoom {
         this.particles.splice(i, 1);
       }
     }
+  }
+
+  nowPlaying(): string {
+    return this.mix?.nowPlaying() ?? "";
   }
 
   play(kind: PartyEffect): void {

@@ -21,9 +21,10 @@ function page(parent: HTMLElement, me: MeResponse | null): HTMLElement {
   el.className = "page";
   el.innerHTML = `
     <header class="site-header">
-      <a class="brand" href="/">Big Brother <span>Ninja</span></a>
+      <a class="brand" href="/">Big Brother <span>House</span></a>
       <nav>
-        <a href="/">Live houses</a>
+        <a href="/#live">On air</a>
+        <a href="/#host">Start a house</a>
         <span class="who"></span>
       </nav>
     </header>
@@ -87,44 +88,47 @@ function seasonLine(s: PublicSeason): string {
 
 const GRID_REFRESH_MS = 5000;
 
-/** Home: a Twitch-style grid of live houses, seasons taking applications, and your own status. */
+/** Home: host card at the top, then live houses and applications. */
 export async function showLanding(parent: HTMLElement): Promise<void> {
   const [me, houses] = await Promise.all([api.me(), api.houses()]);
   const main = page(parent, me);
-  main.classList.add("wide");
+  main.classList.add("wide", "landing");
+  main.closest(".page")?.classList.add("is-landing");
 
+  main.append(hostPanel(me));
   if (me) main.append(...myStatusCards(me));
 
-  const liveHead = document.createElement("h2");
-  liveHead.className = "section-title";
-  liveHead.innerHTML = `<span class="live-dot"></span> Live houses`;
-  main.append(liveHead);
+  const mast = listingsMast(houses.live.length);
+  main.append(mast);
   const grid = new HouseGrid(main);
   grid.set(houses.live);
 
   const appsSection = document.createElement("section");
+  appsSection.id = "apply";
+  appsSection.className = "listings-block";
   main.append(appsSection);
   const renderApps = (seasons: PublicSeason[]) => {
     appsSection.replaceChildren();
-    if (!seasons.length) return;
     const h = document.createElement("h2");
-    h.className = "section-title";
-    h.textContent = "🎟️ Taking applications";
+    h.className = "listings-kicker";
+    h.textContent = "Taking applications";
+    if (!seasons.length) {
+      const empty = para("No houses are recruiting. Start one and send the apply link.");
+      empty.className = "grid-empty";
+      appsSection.append(h, empty);
+      return;
+    }
     appsSection.append(h, applicationCards(seasons));
   };
   renderApps(houses.applications);
 
-  const about = document.createElement("p");
-  about.className = "muted center about";
-  about.textContent =
-    "Selected housemates live together in a 3D house — talking, cooking, plotting — while everyone else watches live, picks favourites and votes.";
-  main.append(about);
-
-  // Keep the grid live: viewer counts, who's where, what's happening.
   const timer = setInterval(async () => {
     try {
       const next = await api.houses();
       grid.set(next.live);
+      mast.dataset.count = String(next.live.length);
+      const meta = mast.querySelector(".listings-meta");
+      if (meta) meta.textContent = listingsMeta(next.live.length);
       renderApps(next.applications);
     } catch {
       // Server blip: keep showing the last data.
@@ -141,32 +145,141 @@ function myStatusCards(me: MeResponse): HTMLElement[] {
   const out: HTMLElement[] = [];
   if (me.canEnter.length) {
     const c = document.createElement("section");
-    c.className = "card page-card highlight";
-    const h = document.createElement("h2");
-    h.textContent = "You're a housemate! 🎉";
+    c.className = "you-strip in";
+    const h = document.createElement("p");
+    h.textContent = me.canEnter.length === 1 ? "You're in the house." : "You're in these houses.";
     c.append(h);
     for (const s of me.canEnter) c.append(linkButton(`/house/${encodeURIComponent(s.id)}`, `Enter ${s.name}`));
     out.push(c);
   }
   if (me.hosting.length) {
     const c = document.createElement("section");
-    c.className = "card page-card";
-    const h = document.createElement("h2");
-    h.textContent = "Houses you host";
-    c.append(h, para(me.hosting.map((s) => `${s.name} (${s.status})`).join(" · ")), linkButton("/bigbrother", "Open the Big Brother console"));
+    c.className = "you-strip";
+    const h = document.createElement("p");
+    h.textContent = `You host ${me.hosting.map((s) => `${s.name} (${s.status})`).join(" · ")}`;
+    c.append(h, linkButton("/bigbrother", "Open console", true));
     out.push(c);
   }
   const pending = me.applications.filter((a) => !me.canEnter.some((s) => s.id === a.season.id));
   if (pending.length) {
     const c = document.createElement("section");
-    c.className = "card page-card";
-    const h = document.createElement("h2");
-    h.textContent = "Your applications";
-    c.append(h);
-    for (const { season, application } of pending) c.append(para(applicationLine(season, application)));
+    c.className = "you-strip";
+    for (const { season, application } of pending) c.append(para(applicationLine(season, application), "muted"));
     out.push(c);
   }
   return out;
+}
+
+function listingsMeta(count: number): string {
+  return count
+    ? `${count} live · pick a house to watch`
+    : "None live · start one and send the apply link";
+}
+
+function listingsMast(count: number): HTMLElement {
+  const el = document.createElement("section");
+  el.className = "listings-mast";
+  el.id = "live";
+  const titles = document.createElement("div");
+  const h1 = document.createElement("h1");
+  h1.textContent = "Houses on air";
+  const meta = document.createElement("p");
+  meta.className = "listings-meta";
+  meta.textContent = listingsMeta(count);
+  titles.append(h1, meta);
+  el.append(titles);
+  return el;
+}
+
+function hostPanel(me: MeResponse | null): HTMLElement {
+  const el = document.createElement("section");
+  el.className = "host-card";
+  el.id = "host";
+  const art = document.createElement("div");
+  art.className = "host-card-art";
+  const img = document.createElement("img");
+  img.src = "/bb-house-prize.jpg";
+  img.alt = "";
+  img.width = 1600;
+  img.height = 900;
+  art.append(img);
+  el.append(art);
+  const copy = document.createElement("div");
+  copy.className = "host-card-copy";
+  const h = document.createElement("h2");
+  h.textContent = "Start a house";
+  copy.append(h, para("Name it, copy the apply link, pick who gets in. You run Big Brother from the console."));
+  el.append(copy);
+
+  if (!me) {
+    const actions = document.createElement("div");
+    actions.className = "host-card-actions";
+    actions.append(linkButton(`/signin?next=${encodeURIComponent("/#host")}`, "Sign in to start"));
+    el.append(actions);
+    return el;
+  }
+
+  const form = document.createElement("form");
+  form.className = "host-form";
+  form.innerHTML = `
+    <label class="field"><span>Season name</span><input name="name" required maxlength="${LIMITS.seasonName}" placeholder="e.g. Friday night house" /></label>
+    <label class="field"><span>Max housemates</span><input name="max" type="number" min="2" max="8" value="8" required /></label>
+    <button type="submit">Start season</button>
+    <p class="error" role="alert"></p>
+  `;
+  const result = document.createElement("div");
+  result.className = "host-result";
+  el.append(form, result);
+
+  const button = form.querySelector("button")!;
+  const error = form.querySelector<HTMLElement>(".error")!;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    button.disabled = true;
+    error.textContent = "";
+    try {
+      const name = (form.elements.namedItem("name") as HTMLInputElement).value.trim();
+      const max = Number((form.elements.namedItem("max") as HTMLInputElement).value);
+      const season = await api.createHouse(name, max);
+      result.replaceChildren(hostedSeasonCard(season));
+      form.reset();
+    } catch (err) {
+      error.textContent = err instanceof Error ? err.message : String(err);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  return el;
+}
+
+function hostedSeasonCard(season: PublicSeason): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "share-box";
+  const title = document.createElement("p");
+  title.className = "share-title";
+  title.textContent = `${season.name} is taking applications.`;
+  const applyUrl = `${location.origin}/apply/${encodeURIComponent(season.id)}`;
+  const row = document.createElement("div");
+  row.className = "share-row";
+  const input = document.createElement("input");
+  input.readOnly = true;
+  input.value = applyUrl;
+  input.setAttribute("aria-label", "Application link");
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.textContent = "Copy apply link";
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(applyUrl);
+      copy.textContent = "Copied";
+    } catch {
+      input.select();
+    }
+  });
+  row.append(input, copy);
+  box.append(title, para("Send this to people you want in the house. Review them in the console, then set the season to Live."), row);
+  box.append(linkButton("/bigbrother", "Open your console"));
+  return box;
 }
 
 function applicationLine(season: PublicSeason, app: ApplicationView): string {

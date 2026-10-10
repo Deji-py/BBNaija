@@ -1,9 +1,8 @@
 import { TV_STATIONS, tvStation, type TvStationId } from "@bbn/shared";
 
 /**
- * Sound for the home theater beside the TV. Stations are short original patterns,
- * scheduled the same way on every client so the house hears one player. A file
- * from this device stays on this computer only.
+ * Sound for the home theater beside the TV. Stations are short original patterns;
+ * an uploaded song is one shared file. Only one of those plays at a time.
  */
 export class HouseRadio {
   private readonly bus: GainNode;
@@ -15,6 +14,7 @@ export class HouseRadio {
   private timer = 0;
   private file: HTMLAudioElement | null = null;
   private fileSource: MediaElementAudioSourceNode | null = null;
+  private sharedUrl = "";
   private readonly noise: AudioBuffer;
 
   constructor(
@@ -48,39 +48,66 @@ export class HouseRadio {
     this.step = 0;
     this.nextTime = this.ctx.currentTime + 0.05;
     if (this.playing && !this.file) this.ensureLoop();
+    if (this.playing && this.file) void this.file.play().catch(() => {});
   }
 
   setPlaying(on: boolean): void {
     this.playing = on;
     if (!on) {
-      this.stopFile();
+      if (this.file) this.file.pause();
       this.stopLoop();
       return;
     }
     void this.ctx.resume();
-    if (!this.file) this.ensureLoop();
+    if (this.file) void this.file.play().catch(() => {});
+    else this.ensureLoop();
   }
 
-  /** Local only. Everyone else keeps hearing the shared station. */
-  playFile(file: File): void {
+  /** Shared uploaded song. Every client loads the same URL and seeks to the same start. */
+  setSharedTrack(url: string, startedAt: number): void {
+    if (!url) {
+      this.sharedUrl = "";
+      this.stopFile();
+      return;
+    }
+    if (url === this.sharedUrl && this.file) {
+      this.seekShared(this.file, startedAt);
+      return;
+    }
     this.stopFile();
-    const audio = new Audio(URL.createObjectURL(file));
+    this.sharedUrl = url;
+    const audio = new Audio();
+    audio.preload = "auto";
+    audio.crossOrigin = "anonymous";
     audio.loop = true;
+    audio.src = url;
     this.file = audio;
     this.fileSource = this.ctx.createMediaElementSource(audio);
     this.fileSource.connect(this.bus);
     this.patternGain.gain.value = 0;
-    void audio.play();
+    const start = () => {
+      this.seekShared(audio, startedAt);
+      if (this.playing) void audio.play().catch(() => {});
+    };
+    if (audio.readyState >= 1) start();
+    else audio.addEventListener("loadedmetadata", start, { once: true });
+  }
+
+  private seekShared(audio: HTMLAudioElement, startedAt: number): void {
+    if (!startedAt || !audio.duration || !Number.isFinite(audio.duration)) return;
+    const pos = ((Date.now() - startedAt) / 1000) % audio.duration;
+    if (Math.abs(audio.currentTime - pos) > 0.45 && !audio.seeking) audio.currentTime = pos;
   }
 
   stopFile(): void {
     if (this.file) {
       this.file.pause();
-      URL.revokeObjectURL(this.file.src);
+      if (this.file.src.startsWith("blob:")) URL.revokeObjectURL(this.file.src);
       this.file = null;
     }
     this.fileSource?.disconnect();
     this.fileSource = null;
+    this.sharedUrl = "";
     this.patternGain.gain.value = 1;
     if (this.playing) this.ensureLoop();
   }

@@ -29,6 +29,7 @@ import { StationSigns } from "../scene/gameHall.js";
 import { isTyping } from "../input/keyboard.js";
 import type { HouseRoom } from "../net/connection.js";
 import { moviePlaybackUrl } from "../net/movies.js";
+import { trackPlaybackUrl } from "../net/radio.js";
 import { getStateCallbacks } from "../net/stateCallbacks.js";
 import { AdminPanel, type TalkTarget } from "../ui/adminPanel.js";
 import { Banners } from "../ui/banner.js";
@@ -128,6 +129,7 @@ export function startAdminMode(
     house.tv.setChannel(state.tvChannel, moviePlaybackUrl(seasonId, state.tvChannel, state.tvMovie));
     house.tv.setOn(state.tvOn);
     house.tv.setStation(state.tvStation);
+    house.tv.setTrack(trackPlaybackUrl(seasonId, state.tvStation, state.tvTrack), state.tvTrackAt);
     house.tv.setTheater(state.theaterOn);
   };
   $.listen("tvOn", syncTv);
@@ -135,6 +137,8 @@ export function startAdminMode(
   $.listen("tvMovie", syncTv);
   $.listen("theaterOn", syncTv);
   $.listen("tvStation", syncTv);
+  $.listen("tvTrack", syncTv);
+  $.listen("tvTrackAt", syncTv);
   syncTv();
   const syncDoors = () => house.doors.setOpen((room.state as HouseStateView).openDoors ?? "");
   $.listen("openDoors", syncDoors);
@@ -267,7 +271,7 @@ export function startAdminMode(
     house.guards.animate(dt);
     dayNight.update((room.state as HouseStateView).dayMinutes ?? 600);
     house.lights.set((room.state as HouseStateView).lightsOff ?? "");
-    party.update(dt, !!(room.state as HouseStateView).partyOn);
+    party.update(dt, room.state as HouseStateView);
     house.setShowers(new Set([...(room.state.players?.values() ?? [])].map((p) => p.activity).filter((a) => a.startsWith("shower-"))));
     renderer.render(scene, camera);
   });

@@ -18,6 +18,7 @@ import {
   SeasonError,
   applicationSeason,
   createSeason,
+  hostSeason,
   decideApplication,
   enterableSeasons,
   getSeason,
@@ -187,6 +188,16 @@ export const routes = createRouter({
         hosting: await Promise.all(hosted.map(toPublicSeason)),
       };
       return res;
+    }),
+  ),
+
+  hostSeason: createEndpoint("/api/seasons", { method: "POST" }, async (ctx) =>
+    handle(ctx as Ctx, async () => {
+      const user = await requireUser(ctx as Ctx);
+      const created = await hostSeason(user.id, ctx.body);
+      const season: PublicSeason = await toPublicSeason(await getSeason(created.id) ?? created);
+      eventLog.add("season", `${user.email} is hosting ${season.name}`, season.id);
+      return { season };
     }),
   ),
 

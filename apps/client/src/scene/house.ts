@@ -216,9 +216,9 @@ export class TvScreen {
     this.radio?.setStation(id);
   }
 
-  /** A track from this computer, through the home theater. Other people keep hearing the shared station. */
-  playFile(file: File): void {
-    this.radio?.playFile(file);
+  /** Shared uploaded song. Empty url returns to the built-in station. */
+  setTrack(url: string, startedAt: number): void {
+    this.radio?.setSharedTrack(url, startedAt);
   }
 
   stopFile(): void {
@@ -1374,7 +1374,8 @@ export function buildModel(kind: string, w: number, d: number, h: number, id = "
       break;
     }
     case "guard":
-      break; // a person, not a model: see HouseGuards
+    case "dj":
+      break; // people, not models: see HouseGuards and PartyDj
     default:
       if (!buildPartyModel(g, kind, w, d, h)) buildStationModel(g, kind, w, d, h, id);
       break;

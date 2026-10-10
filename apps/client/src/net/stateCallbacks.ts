@@ -15,6 +15,8 @@ export interface StateCallbacks {
   listen(property: "tvMovie", cb: (value: string) => void): () => void;
   listen(property: "theaterOn", cb: (value: boolean) => void): () => void;
   listen(property: "tvStation", cb: (value: string) => void): () => void;
+  listen(property: "tvTrack", cb: (value: string) => void): () => void;
+  listen(property: "tvTrackAt", cb: (value: number) => void): () => void;
   listen(property: "openDoors", cb: (value: string) => void): () => void;
   listen(property: "viewerCount", cb: (value: number) => void): () => void;
 }

@@ -329,6 +329,8 @@ export interface PropView {
 
 export interface TvStationMessage {
   station: string;
+  /** Set when switching to a song that was just uploaded. */
+  token?: string;
 }
 
 export interface TvChannelMessage {
@@ -514,8 +516,12 @@ export interface HouseStateView {
   tvMovie: string;
   /** The home theater beside the TV. Music plays from here, not from the television. */
   theaterOn: boolean;
-  /** Which original station the home theater is on ("" until it has been switched on). */
+  /** Which original station the home theater is on, or `file` for the uploaded song. */
   tvStation: string;
+  /** Token for the uploaded sound-bar track, when one is stored for this house. */
+  tvTrack: string;
+  /** Server time (ms) the current uploaded song started, so every client seeks to the same point. */
+  tvTrackAt: number;
   /** Space-separated ids of doors that are open. Missing ids are shut. */
   openDoors: string;
   /** Every movable prop, by id. */
@@ -528,6 +534,10 @@ export interface HouseStateView {
   dayMinutes: number;
   /** Party mode in the party room: music, lights and the dance floor. */
   partyOn: boolean;
+  /** Server time (ms) the current party started; with `partySeed`, every client plays the same mix at the same point. */
+  partyStartedAt: number;
+  /** Shuffles the DJ's setlist for this party. */
+  partySeed: number;
   viewerCount: number;
   /** Session id of the Big Brother console ("" when nobody's at the console). */
   bigBrotherId: string;

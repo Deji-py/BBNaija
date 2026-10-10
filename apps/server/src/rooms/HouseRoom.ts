@@ -42,6 +42,7 @@ import {
   type PartyEffectMessage,
   openDoorList,
   MOVIE_CHANNEL,
+  FILE_STATION,
   tvChannel,
   tvStation,
   type AnimState,
@@ -62,12 +63,14 @@ import {
   type VoiceSignalRelay,
 } from "@bbn/shared";
 import { isAdminSecret, isProduction } from "../config.js";
+import { DJ, PartyDj } from "../systems/dj.js";
 import { userFromSession } from "../accounts/auth.js";
 import { getSeason, housemateAccess, isHostOf } from "../accounts/seasons.js";
 import { savePerks } from "../accounts/seasons.js";
 import { HouseState, Prop, Player, Round } from "../schema/HouseState.js";
 import { ChatLog } from "../systems/chat.js";
 import { currentMovieToken, movieTokenMatches } from "../movies/store.js";
+import { currentTrackToken, trackTokenMatches } from "../radio/store.js";
 import { eventLog } from "../systems/eventLog.js";
 import { db } from "../db/client.js";
 import { livekitConfigured, livekitGrant } from "../voice/livekit.js";
@@ -173,6 +176,7 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
   private readonly reactionLimiter = new RateLimiter(5, 300);
   private readonly jumpLimiter = new RateLimiter(3, 400);
   private readonly partyLimiter = new RateLimiter(3, 1500);
+  private readonly dj = new PartyDj((text) => this.broadcast(Msg.chat, this.chat.add(DJ, text)));
   /** Asking security for the Diary Room: once a minute per housemate. */
   private readonly diaryRequestLimiter = new RateLimiter(1, 60_000);
   private unsubscribeLog: () => void = () => {};
@@ -232,6 +236,8 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
     this.state.tvMovie = currentMovieToken(this.seasonId);
     this.state.theaterOn = false;
     this.state.tvStation = "";
+    this.state.tvTrack = currentTrackToken(this.seasonId);
+    this.state.tvTrackAt = 0;
     this.state.openDoors = "";
     this.state.lightsOff = "";
     this.state.dayMinutes = 10 * 60; // the house wakes up at 10:00
@@ -345,6 +351,9 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
     this.setSimulationInterval(() => this.tick(), 1000 / TICK_RATE_HZ);
     // Clients line their countdowns up with this.
     this.clock.setInterval(() => (this.state.serverTime = Date.now()), 1000);
+    this.clock.setInterval(() => {
+      if (this.state.partyOn) this.dj.tick(this.state.players.values());
+    }, 1000);
     // Summary for the home-page grid of live houses. Colyseus only allows setting
     // metadata directly in onCreate; later updates go through setMatchmaking().
     this.metadata = this.summary();
@@ -473,11 +482,22 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
     });
 
     this.onMessage(Msg.tvStation, (client, message: unknown) => {
-      const station = tvStation(String(field(message, "station") ?? ""));
+      const requested = String(field(message, "station") ?? "");
       const player = this.state.players.get(client.sessionId);
-      if (!station || !player || player.exiting || !this.state.theaterOn) return;
+      if (!player || player.exiting || !this.state.theaterOn) return;
       if (distanceToObject("home-theater", player.x, player.z) > 1.8) return;
-      this.state.tvStation = station;
+      const builtIn = tvStation(requested);
+      if (builtIn) {
+        this.state.tvStation = builtIn;
+        return;
+      }
+      if (requested !== FILE_STATION) return;
+      const sent = field(message, "token");
+      const token = typeof sent === "string" && sent ? sent : this.state.tvTrack;
+      if (!trackTokenMatches(this.seasonId, token)) return;
+      this.state.tvTrack = token;
+      this.state.tvTrackAt = Date.now();
+      this.state.tvStation = FILE_STATION;
     });
 
     this.onMessage(Msg.tvChannel, (client, message: unknown) => {
@@ -666,6 +686,13 @@ export class HouseRoom extends Room<{ state: HouseState; metadata: HouseSummary 
     if (it.kind === "toggle") {
       if (objectId === "dj-booth") {
         this.state.partyOn = !this.state.partyOn;
+        if (this.state.partyOn) {
+          this.state.partyStartedAt = Date.now();
+          this.state.partySeed = Math.floor(Math.random() * 0xffffffff);
+          this.dj.start(player.name);
+        } else {
+          this.dj.stop();
+        }
         this.log("party", `${player.name} ${this.state.partyOn ? "started" : "stopped"} the party`);
         return;
       }

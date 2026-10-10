@@ -1,5 +1,5 @@
 import { LIMITS, SEASON_STATUSES, isSafeHttpUrl, type AdminApplication, type AdminSeason } from "@bbn/shared";
-import type { adminApi } from "../net/api.js";
+import { api as userApi, type adminApi } from "../net/api.js";
 
 type AdminApi = ReturnType<typeof adminApi>;
 
@@ -38,10 +38,10 @@ export class SeasonAdmin {
       <section>
         <h2>Seasons</h2>
         <ul class="season-list"></ul>
-        <form class="new-season" hidden>
+        <form class="new-season">
           <input name="name" placeholder="New season name" maxlength="${LIMITS.seasonName}" required />
           <input name="max" type="number" min="2" max="8" value="8" aria-label="Max housemates" title="Max housemates" />
-          <input name="host" type="email" placeholder="Host's email (optional)" maxlength="${LIMITS.email}" />
+          <input name="host" type="email" placeholder="Host's email (optional)" maxlength="${LIMITS.email}" hidden />
           <button type="submit">Create</button>
         </form>
         <p class="error admin-error" role="alert"></p>
@@ -69,7 +69,8 @@ export class SeasonAdmin {
       const max = Number((form.elements.namedItem("max") as HTMLInputElement).value);
       const host = (form.elements.namedItem("host") as HTMLInputElement).value.trim();
       void this.run(async () => {
-        await this.api.createSeason(name, max, host);
+        if (this.platformAdmin) await this.api.createSeason(name, max, host);
+        else await userApi.createHouse(name, max);
         form.reset();
       });
     });
@@ -108,7 +109,7 @@ export class SeasonAdmin {
       const res = await this.api.seasons();
       this.seasons = res.seasons;
       this.platformAdmin = res.platformAdmin;
-      this.createForm.hidden = !this.platformAdmin;
+      this.createForm.querySelector<HTMLInputElement>("input[name=host]")!.hidden = !this.platformAdmin;
       if (!this.selectedSeason || !this.seasons.some((s) => s.id === this.selectedSeason)) {
         this.selectedSeason = this.seasons.find((s) => s.status === "applications" || s.status === "live")?.id ?? this.seasons[0]?.id ?? null;
       }
@@ -153,6 +154,20 @@ export class SeasonAdmin {
           hostBtn.textContent = "Host…";
           buttons.append(hostBtn);
         }
+        if (s.status === "applications") {
+          const share = document.createElement("button");
+          share.type = "button";
+          share.textContent = "Copy apply link";
+          share.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const url = `${location.origin}/apply/${encodeURIComponent(s.id)}`;
+            void navigator.clipboard.writeText(url).then(
+              () => (share.textContent = "Copied"),
+              () => prompt("Application link", url),
+            );
+          });
+          buttons.append(share);
+        }
         if (this.onOpenConsole && s.status !== "ended") {
           const open = document.createElement("button");
           open.type = "button";
@@ -178,7 +193,7 @@ export class SeasonAdmin {
     if (!this.seasons.length) {
       const li = document.createElement("li");
       li.className = "empty";
-      li.textContent = this.platformAdmin ? "No seasons yet — create one below." : "You don't host any seasons yet. Ask the platform admin to assign you one.";
+      li.textContent = "No seasons yet — create one below, then send the apply link.";
       this.seasonsEl.append(li);
     }
   }

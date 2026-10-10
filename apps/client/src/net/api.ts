@@ -93,6 +93,10 @@ export const api = {
     request<{ application: ApplicationView }>("POST", `/api/seasons/${encodeURIComponent(seasonId)}/applications`, input).then(
       (r) => r.application,
     ),
+
+  /** Signed-in user starts a house they host; it opens for applications immediately. */
+  createHouse: (name: string, maxHousemates: number) =>
+    request<{ season: PublicSeason }>("POST", "/api/seasons", { name, maxHousemates }).then((r) => r.season),
 };
 
 /**

@@ -21,8 +21,10 @@ import {
   nearestInteractable,
   nearestStation,
   GAMES,
+  FILE_STATION,
   MOVIE_CHANNEL,
   MOVIE_MAX_LABEL,
+  TRACK_MAX_LABEL,
   TV_CHANNELS,
   TV_STATIONS,
   type TvChannelMessage,
@@ -57,6 +59,7 @@ import { ChatPanel } from "../ui/chat.js";
 import { showDisconnected } from "../ui/lobby.js";
 import type { HouseRoom } from "../net/connection.js";
 import { moviePlaybackUrl, uploadMovie } from "../net/movies.js";
+import { trackPlaybackUrl, uploadTrack } from "../net/radio.js";
 import { LocalPlayerController } from "../net/localPlayer.js";
 import { lerpAngle } from "../net/interpolation.js";
 import { getStateCallbacks } from "../net/stateCallbacks.js";
@@ -292,6 +295,7 @@ export function startHousemateMode(
     house.tv.setChannel(state.tvChannel, moviePlaybackUrl(seasonId, state.tvChannel, state.tvMovie));
     house.tv.setOn(state.tvOn);
     house.tv.setStation(state.tvStation);
+    house.tv.setTrack(trackPlaybackUrl(seasonId, state.tvStation, state.tvTrack), state.tvTrackAt);
     house.tv.setTheater(state.theaterOn);
   };
   $.listen("tvOn", syncTv);
@@ -299,6 +303,8 @@ export function startHousemateMode(
   $.listen("tvMovie", syncTv);
   $.listen("theaterOn", syncTv);
   $.listen("tvStation", syncTv);
+  $.listen("tvTrack", syncTv);
+  $.listen("tvTrackAt", syncTv);
   syncTv();
   let uploadedToken = "";
   const channelPanel = new TvPanel(
@@ -335,21 +341,39 @@ export function startHousemateMode(
       },
     },
   );
+  let uploadedTrack = "";
   const musicPanel = new TvPanel(
     container,
     "Sound bar",
-    TV_STATIONS,
+    [...TV_STATIONS, { id: FILE_STATION, label: "Uploaded song" }],
     (station) => {
-      const message: TvStationMessage = { station };
+      const token = uploadedTrack || (room.state as HouseStateView).tvTrack;
+      if (station === FILE_STATION && !token) {
+        musicPanel.setStatus("Upload a song first.");
+        return;
+      }
+      const message: TvStationMessage = station === FILE_STATION ? { station, token } : { station };
       room.send(Msg.tvStation, message);
     },
-    "Stations play from the sound bar for the whole house. A file from your device plays only here.",
-    {
-      label: "Play a file from this device",
-      onFile: (file) => house.tv.playFile(file),
-      onStopFile: () => house.tv.stopFile(),
-    },
+    "Everyone in the house hears the same thing. One song at a time — a new upload replaces the last.",
     undefined,
+    {
+      label: `Upload a song (max ${TRACK_MAX_LABEL})`,
+      accept: "audio/mpeg,audio/mp4,audio/ogg,audio/wav,.mp3,.m4a,.ogg,.wav",
+      onFile: (file) => {
+        musicPanel.setStatus("Putting your song on…", true);
+        void uploadTrack(seasonId, file)
+          .then((token) => {
+            uploadedTrack = token;
+            const message: TvStationMessage = { station: FILE_STATION, token };
+            room.send(Msg.tvStation, message);
+            musicPanel.setStatus(null);
+          })
+          .catch((err: unknown) => {
+            musicPanel.setStatus(err instanceof Error ? err.message : "Couldn't upload that song.");
+          });
+      },
+    },
     {
       onToggle: () => {
         const message: ActionMessage = { objectId: "home-theater" };
@@ -640,9 +664,12 @@ export function startHousemateMode(
       const state = room.state as HouseStateView;
       channelPanel.setOpen(state.tvOn && distanceToObject("tv", pos.x, pos.z) <= 1.8, state.tvChannel);
       const atSoundBar = distanceToObject("home-theater", pos.x, pos.z) <= 1.8;
-      musicPanel.setOpen(atSoundBar, state.tvStation, house.tv.localFile);
+      musicPanel.setOpen(atSoundBar, state.tvStation);
       musicPanel.setPower(state.theaterOn);
-      djPanel.setOpen(!!state.partyOn && distanceToObject("dj-booth", pos.x, pos.z) <= 2.2, "");
+      const atBooth = !!state.partyOn && distanceToObject("dj-booth", pos.x, pos.z) <= 2.2;
+      djPanel.setOpen(atBooth, "");
+      const track = party.nowPlaying();
+      djPanel.setStatus(atBooth && track ? `Now playing: ${track}` : null);
       updateBigBrotherState(me, inDiary);
       nomination.setVisible(inDiary && (room.state as HouseStateView).round?.phase === "nominations");
     }
@@ -663,7 +690,7 @@ export function startHousemateMode(
     dayNight.update((room.state as HouseStateView).dayMinutes ?? 600);
     hud.setClock(`${dayNight.night > 0.55 ? "🌙" : "☀️"} ${clockText((room.state as HouseStateView).dayMinutes ?? 600)}`);
     house.lights.set((room.state as HouseStateView).lightsOff ?? "");
-    party.update(dt, !!(room.state as HouseStateView).partyOn);
+    party.update(dt, room.state as HouseStateView);
     house.setShowers(new Set([...(room.state.players?.values() ?? [])].map((p) => p.activity).filter((a) => a.startsWith("shower-"))));
     hud.tick(dt);
     renderer.render(scene, camera);

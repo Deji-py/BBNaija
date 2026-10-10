@@ -108,7 +108,9 @@ export type FurnitureKind =
   | "stage"
   | "lightSwitch"
   // House security, standing at the Diary Room door
-  | "guard";
+  | "guard"
+  // The resident DJ, behind the decks in the party room
+  | "dj";
 
 export interface Furniture {
   /** Stable id — interactions (M4) refer to objects by this. */
@@ -423,6 +425,7 @@ export const FURNITURE: readonly Furniture[] = [
   // Party room: DJ booth on a stage, light-up dance floor under a disco ball, speaker stacks, a bar and sofas
   { id: "party-stage", kind: "stage", x: -29.6, z: 0, w: 2.6, d: 8, h: 0.3, solid: false },
   { id: "dj-booth", kind: "djBooth", x: -29.2, z: 0, w: 1, d: 2.8, h: 1.15, facing: EAST, solid: true },
+  { id: "party-dj", kind: "dj", x: -30.35, z: 0, w: 0.6, d: 0.6, h: 1.9, facing: EAST, solid: true },
   { id: "party-speaker-1", kind: "speaker", x: -29.9, z: -3.4, w: 0.7, d: 0.7, h: 2.2, facing: EAST, solid: true },
   { id: "party-speaker-2", kind: "speaker", x: -29.9, z: 3.4, w: 0.7, d: 0.7, h: 2.2, facing: EAST, solid: true },
   { id: "dance-floor", kind: "danceFloor", x: -22.5, z: 0, w: 8, d: 8, h: 0.04, solid: false },

@@ -91,7 +91,7 @@ export class HouseGrid {
     this.el.className = "house-grid";
     this.empty = document.createElement("p");
     this.empty.className = "grid-empty";
-    this.empty.textContent = "No houses are live right now. Check back soon — or apply to be in the next one!";
+    this.empty.textContent = "No houses are live. Start one, pick housemates, and go live.";
     parent.append(this.el);
     const tick = (t: number) => {
       for (const c of this.cards.values()) drawMiniMap(c.canvas, c.data, t);
@@ -148,7 +148,7 @@ function createCard(initial: HouseCard) {
   tags.className = "thumb-tags";
   const watch = document.createElement("span");
   watch.className = "watch-now";
-  watch.textContent = "▶ Watch now";
+  watch.textContent = "Watch";
   thumb.append(canvas, live, viewers, tags, watch);
 
   const info = document.createElement("div");
@@ -169,7 +169,7 @@ function createCard(initial: HouseCard) {
       card.data = c;
       a.setAttribute("aria-label", `Watch ${c.season.name}, ${c.viewerCount} watching, ${c.housemates.length} housemates`);
       live.textContent = c.open ? "LIVE" : "LIVE · opening soon";
-      viewers.textContent = `👁 ${c.viewerCount}`;
+      viewers.textContent = `${c.viewerCount} watching`;
       tags.replaceChildren(
         ...[c.round && `🗳️ ${c.round}`, c.task && `🏁 ${c.task}`, c.diary && "🎙️ Diary Room", c.tvOn && "📺 TV on"].filter((t): t is string => !!t).map(tag),
       );

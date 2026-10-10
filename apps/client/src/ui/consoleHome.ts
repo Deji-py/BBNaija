@@ -18,7 +18,7 @@ export async function showConsoleHome(
   el.className = "page console-home";
   el.innerHTML = `
     <header class="site-header">
-      <a class="brand" href="/">Big Brother <span>Ninja</span></a>
+      <a class="brand" href="/">Big Brother <span>House</span></a>
       <nav><span class="muted-inline">Big Brother console</span></nav>
     </header>
     <main class="page-main wide"></main>
@@ -33,7 +33,7 @@ export async function showConsoleHome(
     intro.textContent =
       auth.kind === "admin"
         ? "Platform admin: create seasons, assign hosts, and open any house's console."
-        : `Signed in as ${me?.user.email}. You can run the houses you host.`;
+        : `Signed in as ${me?.user.email}. Create a house, send the apply link, then open the console when you're live.`;
     const status = document.createElement("p");
     status.className = "error";
     main.append(intro, status);
@@ -57,21 +57,21 @@ export async function showConsoleHome(
   main.append(choose);
 
   const hostEntry = choose.querySelector<HTMLElement>(".host-entry")!;
-  if (me?.hosting.length) {
+  if (me) {
     const p = document.createElement("p");
     p.className = "muted";
-    p.textContent = `You host ${me.hosting.map((s) => s.name).join(", ")}.`;
+    p.textContent = me.hosting.length
+      ? `You host ${me.hosting.map((s) => s.name).join(", ")}.`
+      : "Create a house, send the apply link, pick housemates, then go live.";
     const b = document.createElement("button");
     b.type = "button";
-    b.textContent = "Continue as host";
+    b.textContent = me.hosting.length ? "Continue as host" : "Host a house";
     b.addEventListener("click", () => enter({ kind: "host" }));
     hostEntry.append(p, b, Object.assign(document.createElement("p"), { className: "muted or", textContent: "— or —" }));
   } else {
     const p = document.createElement("p");
     p.className = "muted";
-    p.innerHTML = me
-      ? "You don't host any seasons. Hosts are assigned by the platform admin."
-      : `Hosts: <a href="/signin?next=%2Fbigbrother">sign in</a> with the email the platform admin assigned to your season.`;
+    p.innerHTML = `To host a house, <a href="/signin?next=%2Fbigbrother">sign in</a>. Anyone can create a season and send out applications.`;
     hostEntry.append(p);
   }
 

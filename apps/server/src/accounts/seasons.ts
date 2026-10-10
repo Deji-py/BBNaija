@@ -185,6 +185,8 @@ export async function listSeasons(hostUserId?: string): Promise<AdminSeason[]> {
   );
 }
 
+const MAX_ACTIVE_HOUSES = 3;
+
 export async function createSeason(body: unknown): Promise<Season> {
   const b = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
   const name = typeof b.name === "string" ? b.name.trim() : "";
@@ -194,6 +196,22 @@ export async function createSeason(body: unknown): Promise<Season> {
   const season = await db.season.create({ data: { name, maxHousemates: max } });
   if (typeof b.hostEmail === "string" && b.hostEmail.trim()) await setSeasonHost(season.id, b.hostEmail);
   return season;
+}
+
+/**
+ * Anyone signed in can start a house: they become the host, and it's immediately
+ * taking applications so they can send the apply link.
+ */
+export async function hostSeason(userId: string, body: unknown): Promise<Season> {
+  const active = await db.season.count({ where: { hostUserId: userId, status: { not: "ended" } } });
+  if (active >= MAX_ACTIVE_HOUSES) {
+    throw new SeasonError("CONFLICT", `You already have ${MAX_ACTIVE_HOUSES} houses running. End one before starting another.`);
+  }
+  const season = await createSeason(body);
+  return db.season.update({
+    where: { id: season.id },
+    data: { hostUserId: userId, status: "applications" },
+  });
 }
 
 /**

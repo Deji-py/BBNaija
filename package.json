@@ -9,7 +9,8 @@
     "build": "pnpm -r build",
     "bots": "pnpm --filter @bbn/server bots",
     "games:check": "pnpm --filter @bbn/server games:check",
-    "layout:check": "pnpm --filter @bbn/server layout:check"
+    "layout:check": "pnpm --filter @bbn/server layout:check",
+    "music": "pnpm --filter @bbn/client music"
   },
   "engines": {
     "node": ">=20"

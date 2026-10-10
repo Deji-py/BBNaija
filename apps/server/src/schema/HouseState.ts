@@ -145,6 +145,8 @@ export const HouseState = schema(
     tvMovie: t.string(),
     theaterOn: t.boolean(),
     tvStation: t.string(),
+    tvTrack: t.string(),
+    tvTrackAt: t.float64(),
     /** Space-separated ids of doors that are open. Empty means every door is shut. */
     openDoors: t.string(),
     /** Every movable prop, by id. */
@@ -157,6 +159,8 @@ export const HouseState = schema(
     dayMinutes: t.float32(),
     /** Party mode in the party room. */
     partyOn: t.boolean(),
+    partyStartedAt: t.float64(),
+    partySeed: t.uint32(),
     viewerCount: t.uint16(),
     bigBrotherId: t.string(),
     bigBrotherSpeaking: t.boolean(),
